@@ -28,7 +28,7 @@ class ModelStore(private val context: Context) {
         const val OCR_REC_MODEL = "rec.onnx"
         const val VAD_SUBDIR = "vad"
         const val VAD_MODEL = "silero.onnx"
-        const val LLM_MODEL = "Qwen3.5-2B-Q4_K_M.gguf"
+        const val LLM_MODEL = "Qwen3-0.6B-Q4_K_M.gguf"
     }
 
     /** 外置私有目录：/sdcard/Android/data/<pkg>/files/models —— 用户插 USB 就能往里拷 */

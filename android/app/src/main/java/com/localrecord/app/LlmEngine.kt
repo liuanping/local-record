@@ -1,4 +1,4 @@
-﻿package com.localrecord.app
+package com.localrecord.app
 
 import android.util.Log
 import java.io.File
@@ -23,7 +23,26 @@ class LlmEngine(private val store: ModelStore) {
 
 重要：直接输出结果，不要输出任何思考过程、推理步骤或内心独白。""".trimIndent()
 
-        fun minutesPrompt(transcript: String): String = """
+/**
+ * 翻译提示词：**目标语言由代码判定**（含汉字→译成英文，否则→译成中文）。
+ * 0.6B 这种小模型靠"自己判断该译成什么"不可靠（实测英文句子会被原样返回），
+ * 所以提示词里写死目标语言，并给一个例子。
+ */
+private const val TRANSLATE_TO_EN =
+    "You are a translator. Translate the user's Chinese into natural English. " +
+        "Output ONLY the English translation - no Chinese, no explanation, no quotes. " +
+        "Example: 今天下雨了 -> It is raining today."
+
+private const val TRANSLATE_TO_ZH =
+    "You are a translator. Translate the user's English into Simplified Chinese. " +
+        "Output ONLY the Chinese translation - no English, no explanation, no quotes. " +
+        "Example: See you tomorrow. -> 明天见。"
+
+/** 兜底重试用的强指令（0.6B 小模型有时会原样返回，换个问法往往就肯翻了） */
+private const val RETRY_TO_EN = "Translate into English: "
+private const val RETRY_TO_ZH = "把下面这句英文翻译成中文："
+
+fun minutesPrompt(transcript: String): String = """
             下面是一次录音的转写文本（每段格式：[编号] HH:MM:SS 文本）：
 
             $transcript
@@ -119,6 +138,42 @@ class LlmEngine(private val store: ModelStore) {
 
     fun summarize(transcript: String, maxTokens: Int = 700): String =
         generate(MINUTES_SYSTEM, minutesPrompt(fit(transcript)), maxTokens)
+
+    /**
+     * 逐句翻译：中文→英文、英文→中文（自动判断方向）。
+     * 输入只放**这一句**，prompt 很短 → 手机上预填充快，能做到"边识别边翻译"。
+     * 末尾的 /no_think 是 Qwen3 的软开关（关闭思维链）；JNI 还会补空 <think> 块，
+     * 输出侧再兜底剥一次，三重保证不出现思考过程。
+     */
+    /** 含汉字就译成英文，否则译成中文（中英互译，方向由代码定，不靠模型猜） */
+    private fun looksChinese(s: String): Boolean =
+        s.any { it.code in 0x3400..0x9FFF || it.code in 0xF900..0xFAFF }
+
+    fun translate(text: String, maxTokens: Int = 220): String {
+        val src = text.trim()
+        if (src.isEmpty()) return ""
+        val toEnglish = looksChinese(src)
+        var out = generate(
+            if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
+            src,
+            maxTokens
+        ).trim()
+        // 0.6B 小模型偶尔"原样返回"（该译成中文却还是英文）。换个更直接的说法重试一次。
+        val wrongLanguage = if (toEnglish) {
+            looksChinese(out)                                  // 要英文却给了中文
+        } else {
+            out.isNotBlank() && !looksChinese(out)             // 要中文却还是英文
+        }
+        if (wrongLanguage) {
+            Log.i(TAG, "翻译语言不对，换问法重试：${out.take(30)}")
+            out = generate(
+                if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
+                (if (toEnglish) RETRY_TO_EN else RETRY_TO_ZH) + src,
+                maxTokens
+            ).trim()
+        }
+        return out
+    }
 
     fun ask(transcript: String, question: String, maxTokens: Int = 300): String =
         // 问答只要相关片段就够，prompt 越短预填充越快（手机上这一段最费时间）

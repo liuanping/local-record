@@ -1,12 +1,29 @@
 cmake_minimum_required(VERSION 3.22.0)
-project(ocrjni CXX C)
+project(llmjni CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 注意：本版本已**移除本地大模型**（会议纪要/问答），所以这里不再编译 llama.cpp/ggml。
-# 保留下来的 native 只有 OCR 推理层：**不链接** onnxruntime（运行时 dlopen sherpa 已经
-# 带进来的那个 .so，避免两个同名 libonnxruntime.so 冲突），所以只要头文件 + dl。
-add_library(ocrjni SHARED ocr_jni.cpp)
-target_include_directories(ocrjni PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ocrjni PRIVATE android log dl)
+# 只编译需要的部分，并静态链接进 libllmjni.so
+set(LLAMA_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER    OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON    OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL            OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
+set(GGML_CCACHE           OFF CACHE BOOL "" FORCE)
+set(GGML_LLAMAFILE        OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+# 第三方源码（llama-cpp-python 源码包里 vendored 的 llama.cpp）
+add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/llama.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/llama-build
+    EXCLUDE_FROM_ALL)
+
+add_library(llmjni SHARED llm_jni.cpp)
+target_link_libraries(llmjni PRIVATE llama ggml android log)
+
+# 说明：3.1.0 起移除了 OCR，所以这里不再有 ocrjni。

@@ -1,4 +1,4 @@
-﻿package com.localrecord.app
+package com.localrecord.app
 
 import android.util.Log
 import java.io.File
@@ -60,7 +60,15 @@ class ModelDownloader(private val store: ModelStore) {
         val llmDir = File(store.externalModelsDir().parentFile, "llm")
         val ocrDir = File(store.externalModelsDir(), ModelStore.OCR_SUBDIR)
         val vadDir = File(store.externalModelsDir(), ModelStore.VAD_SUBDIR)
-        asrDir.mkdirs(); punctDir.mkdirs(); llmDir.mkdirs(); ocrDir.mkdirs(); vadDir.mkdirs()
+        asrDir.mkdirs(); punctDir.mkdirs(); llmDir.mkdirs(); vadDir.mkdirs()
+        // 3.1.0 起不再需要 OCR：把老版本留下的两个模型（约 132MB）删掉，给用户腾空间
+        runCatching {
+            if (ocrDir.exists() && ocrDir.listFiles()?.isNotEmpty() == true) {
+                val freed = ocrDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                ocrDir.deleteRecursively()
+                android.util.Log.i("Download", "已删除旧版 OCR 模型，释放 ${freed / 1048576} MB")
+            }
+        }
         listOf(
             Artifact(
                 "asr-model", "转写模型（Paraformer，中英混说）",
@@ -92,23 +100,18 @@ class ModelDownloader(private val store: ModelStore) {
                 File(punctDir, ModelStore.PUNCT_TOKENS), 4_207_480L, required = false,
                 fallbackUrl = "$HF/csukuangfj/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12/resolve/main/tokens.json",
             ),
-            // ---- OCR（文档问答）：与电脑版同一套 PP-OCRv6 medium ONNX ----
+            // ---- 大模型：Qwen3-0.6B，用于"边识别边翻译" ----
             Artifact(
-                "ocr-det", "文档检测模型（PP-OCRv6 det）",
-                ms("PaddlePaddle/PP-OCRv6_medium_det_onnx", "inference.onnx"),
-                File(ocrDir, ModelStore.OCR_DET_MODEL), 62_032_837L, required = false,
+                "llm",
+                "翻译模型（Qwen3-0.6B）",
+                ms("unsloth/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q4_K_M.gguf"),
+                File(llmDir, ModelStore.LLM_MODEL), 396705472L, required = false,
+                fallbackUrl = "https://hf-mirror.com/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
             ),
-            Artifact(
-                "ocr-rec", "文档识别模型（PP-OCRv6 rec）",
-                ms("PaddlePaddle/PP-OCRv6_medium_rec_onnx", "inference.onnx"),
-                File(ocrDir, ModelStore.OCR_REC_MODEL), 76_554_979L, required = false,
-            ),
-            // ---- 大模型**放最后**：只有"会议纪要/问答"用它，不该挡着前面的功能 ----
-            // 说明：本版本已移除本地大模型，所以不再下载 gguf（体积/内存都省下来）
         )
     }
 
-    /** 必要模型（转写+标点+OCR）总量 —— 用于告诉用户"还差多少就能干活" */
+    /** 必要模型（转写 + 标点 + 断句）总量 —— 用于告诉用户"还差多少就能干活" */
     fun essentialBytes(): Long = artifacts.filter { it.key != "llm" }.sumOf { it.expectBytes }
 
     /** 大文件（大模型）：流量网络下默认等 WiFi */

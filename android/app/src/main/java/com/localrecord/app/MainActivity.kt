@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -94,7 +95,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var store: ModelStore
     private lateinit var asr: AsrEngine
     private lateinit var llm: LlmEngine
-    private lateinit var ocr: OcrEngine
     private lateinit var vadEngine: SileroVad
     private lateinit var downloader: ModelDownloader
     private val io = Executors.newFixedThreadPool(3)
@@ -107,18 +107,80 @@ class MainActivity : ComponentActivity() {
 
     private val segments = mutableStateListOf<Seg>()
 
+    // ---------------- 逐句翻译（边识别边翻译）----------------
+    private var translationOn by mutableStateOf(true)                 // 开关：默认打开
+    /** 段序号 → 译文（Compose 的 stateMap，写进去界面自动刷新） */
+    private val translations = androidx.compose.runtime.mutableStateMapOf<Int, String>()
+    private val translateQueue = java.util.concurrent.LinkedBlockingQueue<Pair<Int, String>>()
+    private val translateRunning = AtomicBoolean(false)
+
+    /** 把一句转写排进翻译队列：串行执行，避免多个请求同时抢大模型 */
+    private fun enqueueTranslation(idx: Int, text: String) {
+        if (!translationOn || text.isBlank() || translations.containsKey(idx)) return
+        translateQueue.offer(idx to text)
+        startTranslateWorker()
+    }
+
+    private fun startTranslateWorker() {
+        if (!translateRunning.compareAndSet(false, true)) return
+        io.execute {
+            try {
+                while (true) {
+                    val (idx, text) = translateQueue.poll() ?: break
+                    if (!translationOn || translations.containsKey(idx)) continue
+                    if (!ensureLlmQuiet()) break
+                    val t0 = System.currentTimeMillis()
+                    val out = try {
+                        llm.translate(text)
+                    } catch (e: Throwable) {
+                        android.util.Log.w("Translate", "翻译失败：${e.message}")
+                        ""
+                    }
+                    val ms = System.currentTimeMillis() - t0
+                    android.util.Log.i("Translate", "第 ${idx + 1} 句 ${ms}ms：${text.take(16)} → ${out.take(24)}")
+                    if (out.isNotBlank()) runOnUiThread { translations[idx] = out }
+                }
+            } finally {
+                translateRunning.set(false)
+                if (translateQueue.isNotEmpty()) startTranslateWorker()
+            }
+        }
+    }
+
+    /** 静默加载大模型：不覆盖转写状态栏（首次要读约 400MB，几秒钟） */
+    private fun ensureLlmQuiet(): Boolean {
+        if (llm.ready) return true
+        if (llm.findModel() == null) {
+            runOnUiThread { status = "翻译模型还没下载好，下完会自动开始翻译" }
+            return false
+        }
+        val ok = try {
+            llm.init()
+        } catch (_: Throwable) {
+            false
+        }
+        llmReady = ok
+        if (!ok) runOnUiThread { status = "翻译模型加载失败（可能内存不够），已暂停翻译" }
+        return ok
+    }
+
+    /** 开关重新打开时，把还没翻译的句子补上 */
+    private fun translateMissing() {
+        segments.forEachIndexed { i, s -> if (!translations.containsKey(i)) enqueueTranslation(i, s.text) }
+    }
+
     /** 清空转写：带上调用堆栈，方便定位"谁把它清了"（之前遇到过"界面 0 段但状态说 9 段"） */
     private fun clearSegments(why: String) {
         android.util.Log.i("Segments", "清空转写（$why），之前 ${segments.size} 段", Throwable("clearSegments"))
         segments.clear()
+        translations.clear()
+        translateQueue.clear()
     }
     private var recording by mutableStateOf(false)
     private var level by mutableStateOf(0f)
     private var status by mutableStateOf("正在加载模型…")
     private var asrReady by mutableStateOf(false)
     private var llmReady by mutableStateOf(false)
-    private var ocrReady by mutableStateOf(false)
-    private var ocrText by mutableStateOf("")
     private var llmName by mutableStateOf("")
     private var minutes by mutableStateOf("")
     private var answer by mutableStateOf("")
@@ -133,12 +195,10 @@ class MainActivity : ComponentActivity() {
     private var playDurMs by mutableStateOf(0)
     private var pathDialog by mutableStateOf<String?>(null)    // 显示/复制路径的对话框
     private var micBlocked by mutableStateOf(false)            // 麦克风权限被拒 → 弹窗引导去设置
-    private var ocrFilesReady by mutableStateOf(false)         // OCR 模型文件是否已在手机上
     private var asrFilesReady by mutableStateOf(false)         // 识别模型文件是否已在手机上
 
     private var deleteDialog by mutableStateOf<File?>(null)    // 删除确认对话框
     private var seeking by mutableStateOf(false)               // 是否正在拖动进度条
-    private var ocrCopied by mutableStateOf(false)             // OCR 文字刚被复制（显示"已复制 ✓"）
     private var textCopied by mutableStateOf(false)            // 转写文字刚被复制
     private var llmDialog by mutableStateOf<Pair<String, String>?>(null)   // 大模型结果弹窗（标题 to 内容）
     private var recTick by mutableStateOf(0L)                  // 录音计时/波形的刷新触发器
@@ -373,13 +433,6 @@ class MainActivity : ComponentActivity() {
                                     val o = asr.init()          // 标点在 init 里一起加载
                                     runOnUiThread { asrReady = o }
                                 }
-                                "ocr-det", "ocr-rec" -> {
-                                    refreshModelFileFlags()
-                                    if (!ocr.ready) {
-                                        val o = ocr.init()
-                                        runOnUiThread { ocrReady = o }
-                                    }
-                                }
                                 "llm" -> {
                                     // 不自动加载（占内存），等用户点「生成会议纪要」时再加载
                                 }
@@ -474,6 +527,11 @@ class MainActivity : ComponentActivity() {
     private fun transcriptText(): String =
         segments.joinToString("\n") { "[${it.startSec.toInt()}] ${it.text}" }
 
+    /** 必要模型是否已就位（只用于顶部"还没下载完"的提示） */
+    private fun refreshModelFileFlags() {
+        asrFilesReady = store.asrReady()
+    }
+
     private fun ensureLlm(): Boolean {
         if (llm.ready) return true
         if (llm.findModel() == null) {
@@ -510,8 +568,8 @@ class MainActivity : ComponentActivity() {
     private fun startAsk() {
         val q = question.trim()
         if (q.isEmpty()) return
-        val isOcr = tab == 2
-        val text = if (isOcr) ocrText else transcriptText()
+        val isOcr = false
+        val text = transcriptText()
         if (text.isBlank()) { status = if (isOcr) "先选一张图片做识别" else "还没有转写内容"; return }
         if (!llmBusy.compareAndSet(false, true)) { status = "大模型正忙"; return }
         io.execute {
@@ -675,38 +733,6 @@ class MainActivity : ComponentActivity() {
         runOnUiThread { status = "实时转写自检：会话1=${s1.size} 段，会话2=${s2.size} 段" }
     }
 
-    // ------------------------------------------------------- OCR 文档问答 ----
-
-    /** OCR 自检：识别 files/ocr-selftest.png，逐行结果与整段文本写到 ocr-selftest-result.txt */
-    private fun runOcrSelfTest() {
-        val out = File(store.externalModelsDir().parentFile, "ocr-selftest-result.txt")
-        fun report(line: String) {
-            android.util.Log.i("OcrSelfTest", line)
-            try { out.appendText(line + "\n") } catch (_: Exception) {}
-        }
-        val img = File(store.externalModelsDir().parentFile, "ocr-selftest.png")
-        report("det 模型=${store.ocrDetModel().absolutePath} 存在=${store.ocrDetModel().isFile}")
-        report("rec 模型=${store.ocrRecModel().absolutePath} 存在=${store.ocrRecModel().isFile}")
-        report("测试图片=${img.absolutePath} 存在=${img.isFile}")
-        if (!img.isFile()) { report("FAIL 没有测试图片"); return }
-        val ok = ocr.init()
-        report("OcrEngine.init=$ok")
-        if (!ok) return
-        val bmp = android.graphics.BitmapFactory.decodeFile(img.absolutePath)
-        report("图片尺寸=${bmp?.width}x${bmp?.height}")
-        if (bmp == null) { report("FAIL 图片解码失败"); return }
-        val t0 = System.currentTimeMillis()
-        val lines = ocr.recognize(bmp)
-        val ms = System.currentTimeMillis() - t0
-        report("用时=${ms}ms 行数=${lines.size}")
-        lines.forEach { report("LINE [${"%.2f".format(it.score)}] ${it.text}") }
-        val text = ocr.toText(lines)
-        report("TEXT-BEGIN")
-        text.split("\n").forEach { report("  $it") }
-        report("TEXT-END")
-        runOnUiThread { ocrText = text; ocrReady = ok; tab = 2; status = "OCR 自检完成：${lines.size} 行，${ms}ms" }
-    }
-
     /** 导入外部音频（mp3/wav/m4a/…）：复制进录音目录，然后自动转写 */
     private val pickAudio = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -754,67 +780,56 @@ class MainActivity : ComponentActivity() {
         null
     }
 
-    /** 选图 → 离线 OCR → 文字进界面（随后可提问） */
-    private val pickImage = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri == null) return@registerForActivityResult
-        // 选新图：立刻清掉上一张的识别文字与 AI 回答（含弹窗），避免和这张混在一起
-        ocrText = ""
-        answer = ""
-        llmDialog = null
-        status = "正在识别图片…"
-        io.execute {
-            val bmp = decodeBitmap(uri)
-            if (bmp == null) {
-                runOnUiThread { status = "读图片失败（换一张试试）" }
-                return@execute
-            }
-            if (!ocr.init()) {
-                // 不显示"未就绪"这种内部状态，直接给可操作的两条路
-                runOnUiThread {
-                    status = if (store.ocrReady())
-                        "识别初始化失败，请重启应用再试"
-                    else "识别需要的模型还没下载完：点上面的「继续下载」，或手动导入 ocr/ 目录"
-                }
-                return@execute
-            }
-            runOnUiThread { ocrReady = true }
-            val t0 = System.currentTimeMillis()
-            val lines = ocr.recognize(bmp)
-            val text = ocr.toText(lines)
-            val ms = System.currentTimeMillis() - t0
-            runOnUiThread {
-                ocrText = text
-                answer = ""
-                status = if (lines.isEmpty()) "这张图没识别到文字（试试更清晰或更大的图）"
-                else "识别完成：${lines.size} 行 / ${text.length} 字，用时 ${ms / 1000.0}s"
-                android.util.Log.i("OcrEngine", "识别结果：$text")
-            }
-        }
-    }
 
-    /** 大图先降采样，避免 OOM（det 侧最多用到 960，留点余量给裁切） */
-    private fun decodeBitmap(uri: android.net.Uri): android.graphics.Bitmap? {
-        return try {
-            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(uri)?.use {
-                android.graphics.BitmapFactory.decodeStream(it, null, bounds)
-            }
-            var sample = 1
-            val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
-            while (maxDim / sample > 2400) sample *= 2
-            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            contentResolver.openInputStream(uri)?.use {
-                android.graphics.BitmapFactory.decodeStream(it, null, opts)
-            }
-        } catch (e: Throwable) {
-            android.util.Log.e("OcrEngine", "解码图片失败", e)
-            null
-        }
-    }
 
     /** 大模型自检：用固定转写跑一次会议纪要，结果写字到文件（供无 UI 验证） */
+    /** --ez translatetest true：验证逐句翻译（Qwen3-0.6B）是否可用、是否关掉思维链 */
+    private fun runTranslateSelfTest() {
+        io.execute {
+            val out = File(store.externalModelsDir().parentFile, "translate-result.txt")
+            val sb = StringBuilder()
+            fun report(line: String) {
+                sb.append(line).append("\n")
+                android.util.Log.i("TranslateTest", line)
+            }
+            val model = llm.findModel()
+            report("大模型文件=${model?.absolutePath ?: "没找到"}")
+            report("文件大小=${model?.length()?.div(1048576) ?: 0} MB")
+            val t0 = System.currentTimeMillis()
+            val ok = try {
+                llm.init()
+            } catch (e: Throwable) {
+                report("加载异常：${e.message}")
+                false
+            }
+            report("加载=${ok}（${System.currentTimeMillis() - t0}ms） 已加载=${llm.loadedModel}")
+            if (ok) {
+                for (s in listOf(
+                    "今天的会议改到下午三点，请大家准时参加。",
+                    "Please send me the updated report by Friday."
+                )) {
+                    val t1 = System.currentTimeMillis()
+                    val tr = try {
+                        llm.translate(s)
+                    } catch (e: Throwable) {
+                        "异常：${e.message}"
+                    }
+                    report("原文：$s")
+                    report("译文：$tr")
+                    report("用时=${System.currentTimeMillis() - t1}ms")
+                }
+                report("RESULT PASS")
+            } else {
+                report("RESULT FAIL（模型没加载起来）")
+            }
+            try {
+                out.writeText(sb.toString())
+            } catch (_: Throwable) {
+            }
+            runOnUiThread { status = "翻译自检完成：${out.name}" }
+        }
+    }
+
     private fun runLlmSelfTest() {
         val out = File(store.externalModelsDir().parentFile, "llm-selftest-result.txt")
         fun report(line: String) {
@@ -852,14 +867,13 @@ class MainActivity : ComponentActivity() {
         store = ModelStore(this)
         asr = AsrEngine(store)
         llm = LlmEngine(store)
-        ocr = OcrEngine(store, this)
         vadEngine = SileroVad(store)
         downloader = ModelDownloader(store)
         refreshRecordings()
         val selfTest = intent?.getBooleanExtra("selftest", false) == true
         val llmSelfTest = intent?.getBooleanExtra("llmselftest", false) == true
+        val translateTest = intent?.getBooleanExtra("translatetest", false) == true
         val downloadTest = intent?.getBooleanExtra("downloadtest", false) == true
-        val ocrTest = intent?.getBooleanExtra("ocrtest", false) == true
         val liveTest = intent?.getBooleanExtra("livetest", false) == true
         val audioTest = intent?.getBooleanExtra("audiotest", false) == true
         // 仅用于离线/无模型时验证"结果弹窗"界面：--ez llmdemo true
@@ -870,11 +884,6 @@ class MainActivity : ComponentActivity() {
             var ok = asr.init()
             // 模型文件在不在手机上（用于界面显示"可直接识别"，避免明明能用却显示未就绪）
             refreshModelFileFlags()
-            // 识别模型有了就顺手把 OCR 也加载好（后台做，用户切到文档问答时就已经能用）
-            if (store.ocrReady() && !ocr.ready) {
-                val o = ocr.init()
-                runOnUiThread { ocrReady = o }
-            }
             // 缺模型就自动全部下（不给用户选择）；已有的文件按字节数判断、不会重复下
             if (!downloadTest && !noDownload) {
                 refreshMissing()
@@ -891,8 +900,8 @@ class MainActivity : ComponentActivity() {
             }
             if (selfTest && ok) runSelfTest()
             if (llmSelfTest) runLlmSelfTest()
+            if (translateTest) runTranslateSelfTest()
             if (downloadTest) runDownloadSelfTest()
-            if (ocrTest) runOcrSelfTest()
             if (liveTest) runLiveSelfTest()
             if (audioTest) runAudioImportSelfTest()
             if (llmDemo) {
@@ -1100,8 +1109,6 @@ class MainActivity : ComponentActivity() {
                     text = { Text("语音", color = Color.White) })
                 Tab(selected = tab == 1, onClick = { tab = 1; refreshRecordings() },
                     text = { Text("录音库", color = Color.White) })
-                Tab(selected = tab == 2, onClick = { tab = 2 },
-                    text = { Text("文档问答", color = Color.White) })
             }
             Spacer(Modifier.height(6.dp))
 
@@ -1109,8 +1116,7 @@ class MainActivity : ComponentActivity() {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (tab) {
                     0 -> VoiceTab()
-                    1 -> LibraryTab()
-                    else -> OcrTab()
+                    else -> LibraryTab()
                 }
             }
 
@@ -1137,83 +1143,34 @@ class MainActivity : ComponentActivity() {
                     },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) { Text(if (enhanceOn) "降噪 开" else "降噪 关", fontSize = 11.sp) }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
+                // 逐句翻译开关：打开后每识别出一句立刻翻译，原文与译文并排显示
                 Text(
-                    "本地录音：录音转写与图片识别全部在手机本地完成，不联网、不上传任何内容。" +
-                        "代码完全开源，安全放心。",
-                    color = Color(0xFF6B7686), fontSize = 9.sp, maxLines = 3
+                    "边识别边翻译",
+                    color = if (translationOn) Accent else Color(0xFF6B7686),
+                    fontSize = 11.sp
+                )
+                androidx.compose.material3.Switch(
+                    checked = translationOn,
+                    onCheckedChange = { on ->
+                        translationOn = on
+                        if (on) {
+                            translateMissing()
+                            if (segments.isNotEmpty()) status = "正在翻译已有 ${segments.size} 句…"
+                        } else {
+                            status = "已关闭翻译"
+                        }
+                    }
                 )
             }
+            Text(
+                "本地录音：录音转写与逐句翻译全部在手机本地完成，不联网、不上传任何内容。代码完全开源，安全放心。",
+                color = Color(0xFF6B7686), fontSize = 9.sp, maxLines = 3
+            )
             Spacer(Modifier.height(6.dp))
         }
     }
 
-    @Composable
-    private fun OcrTab() {
-        // "已复制 ✓" 提示 1.6 秒后复位
-        LaunchedEffect(ocrCopied) {
-            if (ocrCopied) {
-                kotlinx.coroutines.delay(1600)
-                ocrCopied = false
-            }
-        }
-        Column(modifier = Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(44.dp)
-                    .background(Card, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = { pickImage.launch("image/*") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                ) { Text("选择图片", color = Color.White, fontSize = 12.sp) }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    // 不显示"就绪/未就绪"这类内部状态：能用就直接用；
-                    // 只有真的缺模型、需要去下载时才在下面提示（下载进度条 + 继续下载入口）
-                    "识别图片里的文字（可一键复制）",
-                    color = Color(0xFF9AA4B2), fontSize = 10.sp
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            val listState = rememberLazyListState()
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxWidth().weight(1f)
-                    .background(Card, RoundedCornerShape(12.dp)).padding(8.dp)
-            ) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "识别结果（${ocrText.length} 字）",
-                            color = Color(0xFF9AA4B2), fontSize = 11.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (ocrText.isNotEmpty()) {
-                            Text(
-                                if (ocrCopied) "已复制 ✓" else "⧉ 复制",
-                                color = if (ocrCopied) Color(0xFF66D19E) else Accent, fontSize = 11.sp,
-                                modifier = Modifier.clickable {
-                                    copyPlain(ocrText, "识别文字")
-                                    ocrCopied = true
-                                }
-                            )
-                        }
-                    }
-                }
-                item {
-                    Text(
-                        if (ocrText.isEmpty())
-                            "选一张带文字的图片（合同 / 截图 / 文档 / 名片），识别出来的文字会显示在这里，可一键复制。\n\n全程在手机上完成。" +
-                                "然后就能在下面输入框里对它提问。\n\n全程在手机上完成，图片和文字都不会上传。"
-                        else ocrText,
-                        color = Color(0xFFE9EDF5), fontSize = 13.sp
-                    )
-                }
-            }
-        }
-    }
 
     /** 复制任意文字到剪贴板（转写结果、会议纪要、OCR 文字都用它） */
     private fun copyPlain(text: String, what: String) {
@@ -1466,16 +1423,25 @@ class MainActivity : ComponentActivity() {
                                     "清空", color = Color(0xFF9AA4B2), fontSize = 11.sp,
                                     modifier = Modifier.clickable {
                                         clearSegments("用户点清空")
-                                        minutes = ""; answer = ""; ocrText = ""; llmDialog = null
+                                        minutes = ""; answer = ""; llmDialog = null
                                     }
                                 )
                             }
                         }
                     }
-                    items(segments) { s ->
+                    itemsIndexed(segments) { i, s ->
                         Column(modifier = Modifier.padding(vertical = 3.dp)) {
                             Text(fmt(s.startSec), color = Color(0xFF6D8BFF), fontSize = 10.sp)
                             Text(s.text, color = Color(0xFFE9EDF5), fontSize = 14.sp)
+                            // 译文：紧跟原文；灰色=翻译中，绿色=已译好
+                            if (translationOn) {
+                                val tr = translations[i]
+                                Text(
+                                    if (tr == null) "翻译中…" else tr,
+                                    color = if (tr == null) Color(0xFF6B7686) else Color(0xFF7FD1A8),
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -1880,6 +1846,7 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             segments.add(Seg(text, startSec, end, fmt(startSec)))
             android.util.Log.i("Segments", "加入第 ${segments.size} 段：${text.take(12)}")
+            enqueueTranslation(segments.size - 1, text)
             status = if (fromSilero) {
                 "已转写 ${segments.size} 段（人声 $speechWin 窗 / ${(speechPct * 100).toInt()}%）"
             } else {
@@ -2038,15 +2005,6 @@ class MainActivity : ComponentActivity() {
         return "%02d:%02d".format(total / 60, total % 60)
     }
 
-    /** 检查模型文件是否已经在手机上（用于界面显示，避免"明明能用却显示未就绪"） */
-    private fun refreshModelFileFlags() {
-        val ocrOk = store.ocrReady()
-        val asrOk = store.asrReady()
-        runOnUiThread {
-            ocrFilesReady = ocrOk
-            asrFilesReady = asrOk
-        }
-    }
 
     private fun refreshRecordings() {
         recordings.clear()

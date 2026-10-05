@@ -5,28 +5,39 @@
 > 本项目**不含本地大模型**（3.0.0 起移除）。之前版本支持"会议纪要 / 问答"（MiniCPM5 / Qwen3.5），
 > 相关代码仍在 git 历史里（`android-v2.5.2` 及更早的标签），如需可自行检出。
 
+## 下载安装
+
+| 渠道 | 下载 APK | 发行版页面 |
+|---|---|---|
+| **Gitee**（国内直连）⭐ | [LocalRecord-android-3.1.0.apk](https://gitee.com/liuanping100/local-record/releases/download/v3.1.0/LocalRecord-android-3.1.0.apk) | [v3.1.0](https://gitee.com/liuanping100/local-record/releases/tag/v3.1.0) |
+| GitHub | [LocalRecord-android-3.1.0.apk](https://github.com/liuanping/local-record/releases/download/v3.1.0/LocalRecord-android-3.1.0.apk) | [v3.1.0](https://github.com/liuanping/local-record/releases/tag/v3.1.0) |
+
+安装：下载后点击安装（首次可能提示"未知来源"，允许即可）；首次打开会自动下载模型（转写+标点+断句约 514MB，
+翻译模型 397MB，建议 WiFi）。
+
 ## 功能
 
 | 页面 | 功能 |
 |---|---|
 | **语音** | 录音（切后台继续录）· 实时转写（中英混说）· 自动断句（神经网络 VAD）· 自动标点 · 自动滚到最新 / 可拖动进度 · 一键复制 |
 | **录音库** | 导入音频（mp3 / wav / m4a / aac / ogg / flac / amr）· 播放（可拖进度）· 删除 · 显示文件路径（可复制）· 导入后自动转写 |
-| **文档问答** | 选图片 → 离线 OCR 识别（中英数字）→ 一键复制 |
+| **逐句翻译** | 每识别出一句就立刻翻译（中文→英文 / 英文→中文），原文与译文并列显示，底部开关可关闭 |
 
 其他：深色主题 · 应用图标 · 首次运行自动下载模型（ModelScope 主源，失败回退 hf-mirror）· 断点续传 · 后台下载。
 
+翻译使用 **Qwen3-0.6B（Q4_K_M，397MB）** 在手机本地逐句翻译，不联网、不上传。
+
 ## 体积与模型
 
-* APK：**约 36 MB**（只含 arm64-v8a）
-* 需要自动下载的模型合计约 **634 MB**：
+* APK：**约 41 MB**（只含 arm64-v8a；含本地翻译用的 llama.cpp）
+* 需要自动下载的模型合计约 **911 MB**（转写相关 514MB + 翻译模型 397MB）：
 
 | 用途 | 模型 | 大小 |
 |---|---|---|
 | 语音识别 | Paraformer zh int8（中英混说） | 227 MB |
 | 标点 | CT-Transformer | 285 MB |
 | 断句 | Silero VAD（神经网络） | 2.3 MB |
-| OCR 检测 | PP-OCRv6 medium det | 59 MB |
-| OCR 识别 | PP-OCRv6 medium rec | 73 MB |
+| 翻译（Qwen3-0.6B Q4_K_M） | 中英互译，本地逐句翻译 | 397 MB |
 
 模型全部从 **ModelScope** 下载（失败自动回退 hf-mirror），不打包进 APK，所以安装包很小、模型可独立更新。
 
