@@ -1,4 +1,4 @@
-# 本地录音（Local Record）
+﻿# 本地录音（Local Record）
 
 一个**完全离线**的 Android 录音转写 + 图片文字识别 App。录音、语音识别、标点、OCR **全部在手机本地完成**，不联网、不上传任何数据。
 
@@ -9,8 +9,8 @@
 
 | 渠道 | 下载 APK | 发行版页面 |
 |---|---|---|
-| **Gitee**（国内直连）⭐ | [LocalRecord-android-3.1.0.apk](https://gitee.com/liuanping100/local-record/releases/download/v3.1.0/LocalRecord-android-3.1.0.apk) | [v3.1.0](https://gitee.com/liuanping100/local-record/releases/tag/v3.1.0) |
-| GitHub | [LocalRecord-android-3.1.0.apk](https://github.com/liuanping/local-record/releases/download/v3.1.0/LocalRecord-android-3.1.0.apk) | [v3.1.0](https://github.com/liuanping/local-record/releases/tag/v3.1.0) |
+| **Gitee**（国内直连）⭐ | [LocalRecord-android-3.1.1.apk](https://gitee.com/liuanping100/local-record/releases/download/v3.1.1/LocalRecord-android-3.1.1.apk) | [v3.1.1](https://gitee.com/liuanping100/local-record/releases/tag/v3.1.1) |
+| GitHub | [LocalRecord-android-3.1.1.apk](https://github.com/liuanping/local-record/releases/download/v3.1.1/LocalRecord-android-3.1.1.apk) | [v3.1.1](https://github.com/liuanping/local-record/releases/tag/v3.1.1) |
 
 安装：下载后点击安装（首次可能提示"未知来源"，允许即可）；首次打开会自动下载模型（转写+标点+断句约 514MB，
 翻译模型 397MB，建议 WiFi）。

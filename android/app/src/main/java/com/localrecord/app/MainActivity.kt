@@ -114,10 +114,24 @@ class MainActivity : ComponentActivity() {
     private val translateQueue = java.util.concurrent.LinkedBlockingQueue<Pair<Int, String>>()
     private val translateRunning = AtomicBoolean(false)
 
-    /** 把一句转写排进翻译队列：串行执行，避免多个请求同时抢大模型 */
+    /** 待翻译最多留几句：超了丢最旧的，保证翻译追着"最新一句"而不是越拖越远 */
+    private val MAX_PENDING = 5
+
+    /** 因积压被跳过的段（界面标一下，免得一直显示"翻译中…"） */
+    private val translateSkipped = androidx.compose.runtime.mutableStateListOf<Int>()
+
+    /** 把一句转写排进翻译队列：串行执行，避免几个请求同时抢大模型 */
     private fun enqueueTranslation(idx: Int, text: String) {
-        if (!translationOn || text.isBlank() || translations.containsKey(idx)) return
+        if (!translationOn || translations.containsKey(idx)) return
+        // 太短的（"嗯"、"好"、单个符号）不值得花一秒去翻译，直接跳过省时间
+        if (text.trim().count { it.isLetterOrDigit() } < 2) return
         translateQueue.offer(idx to text)
+        // 积压保护：只保留最新 MAX_PENDING 句，多出来的丢掉并标注
+        while (translateQueue.size > MAX_PENDING) {
+            val dropped = translateQueue.poll() ?: break
+            translateSkipped.add(dropped.first)
+            android.util.Log.i("Translate", "积压过多，跳过第 ${dropped.first + 1} 句")
+        }
         startTranslateWorker()
     }
 
@@ -164,16 +178,13 @@ class MainActivity : ComponentActivity() {
         return ok
     }
 
-    /** 开关重新打开时，把还没翻译的句子补上 */
-    private fun translateMissing() {
-        segments.forEachIndexed { i, s -> if (!translations.containsKey(i)) enqueueTranslation(i, s.text) }
-    }
 
     /** 清空转写：带上调用堆栈，方便定位"谁把它清了"（之前遇到过"界面 0 段但状态说 9 段"） */
     private fun clearSegments(why: String) {
         android.util.Log.i("Segments", "清空转写（$why），之前 ${segments.size} 段", Throwable("clearSegments"))
         segments.clear()
         translations.clear()
+        translateSkipped.clear()
         translateQueue.clear()
     }
     private var recording by mutableStateOf(false)
@@ -1143,25 +1154,6 @@ class MainActivity : ComponentActivity() {
                     },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) { Text(if (enhanceOn) "降噪 开" else "降噪 关", fontSize = 11.sp) }
-                Spacer(Modifier.width(12.dp))
-                // 逐句翻译开关：打开后每识别出一句立刻翻译，原文与译文并排显示
-                Text(
-                    "边识别边翻译",
-                    color = if (translationOn) Accent else Color(0xFF6B7686),
-                    fontSize = 11.sp
-                )
-                androidx.compose.material3.Switch(
-                    checked = translationOn,
-                    onCheckedChange = { on ->
-                        translationOn = on
-                        if (on) {
-                            translateMissing()
-                            if (segments.isNotEmpty()) status = "正在翻译已有 ${segments.size} 句…"
-                        } else {
-                            status = "已关闭翻译"
-                        }
-                    }
-                )
             }
             Text(
                 "本地录音：录音转写与逐句翻译全部在手机本地完成，不联网、不上传任何内容。代码完全开源，安全放心。",
@@ -1391,6 +1383,22 @@ class MainActivity : ComponentActivity() {
                                 color = Color(0xFF9AA4B2), fontSize = 11.sp,
                                 modifier = Modifier.weight(1f)
                             )
+                            // 翻译开关：小内联链接（和复制/清空同风格），**常显**（列表空着也能开）。
+                            // 打开后**只翻译之后的句子**，不动历史 —— 否则说久了队列越堆越多，追不上。
+                            Text(
+                                if (translationOn) "翻译 开" else "翻译 关",
+                                color = if (translationOn) Color(0xFF7FD1A8) else Color(0xFF9AA4B2),
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable {
+                                    translationOn = !translationOn
+                                    status = if (translationOn) {
+                                        "已开启翻译：从这一句开始逐句翻译（之前几句保持原文）"
+                                    } else {
+                                        "已关闭翻译"
+                                    }
+                                }
+                            )
+                            Spacer(Modifier.width(12.dp))
                             // 常显「⇣ 最新」：点了就回到底部（已在底部时点了也无副作用），
                             // 不用判断 canScrollForward（在吸顶项里读它有时不触发重组）
                             if (segments.isNotEmpty()) {
@@ -1436,9 +1444,18 @@ class MainActivity : ComponentActivity() {
                             // 译文：紧跟原文；灰色=翻译中，绿色=已译好
                             if (translationOn) {
                                 val tr = translations[i]
+                                val skipped = translateSkipped.contains(i)
                                 Text(
-                                    if (tr == null) "翻译中…" else tr,
-                                    color = if (tr == null) Color(0xFF6B7686) else Color(0xFF7FD1A8),
+                                    when {
+                                        tr != null -> tr
+                                        skipped -> "（说得太快，这句没来得及翻）"
+                                        else -> "翻译中…"
+                                    },
+                                    color = when {
+                                        tr != null -> Color(0xFF7FD1A8)
+                                        skipped -> Color(0xFF5A6372)
+                                        else -> Color(0xFF6B7686)
+                                    },
                                     fontSize = 12.sp
                                 )
                             }
