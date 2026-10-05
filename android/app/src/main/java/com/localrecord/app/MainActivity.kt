@@ -1332,7 +1332,39 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.size(52.dp),
                         contentPadding = PaddingValues(0.dp)
                     ) { Text(if (recording) "停" else "录", color = Color.White) }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(14.dp))
+                    // 翻译开关：录音圆钮右边的胶囊按钮（单行、有底色、字号大，一眼能看见）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(
+                                if (translationOn) Color(0xFF1E6B49) else Color(0xFF232A36)
+                            )
+                            .clickable {
+                                translationOn = !translationOn
+                                status = if (translationOn) {
+                                    "已开启翻译：从这一句开始逐句翻译（之前几句保持原文）"
+                                } else {
+                                    "已关闭翻译"
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 11.dp)
+                    ) {
+                        Text(
+                            if (translationOn) "●" else "○",
+                            color = if (translationOn) Color(0xFF8CE0B4) else Color(0xFF6B7686),
+                            fontSize = 12.sp
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (translationOn) "翻译 开" else "翻译 关",
+                            color = if (translationOn) Color.White else Color(0xFF9AA4B2),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
                 }
             }
             Spacer(Modifier.height(6.dp))
@@ -1383,22 +1415,6 @@ class MainActivity : ComponentActivity() {
                                 color = Color(0xFF9AA4B2), fontSize = 11.sp,
                                 modifier = Modifier.weight(1f)
                             )
-                            // 翻译开关：小内联链接（和复制/清空同风格），**常显**（列表空着也能开）。
-                            // 打开后**只翻译之后的句子**，不动历史 —— 否则说久了队列越堆越多，追不上。
-                            Text(
-                                if (translationOn) "翻译 开" else "翻译 关",
-                                color = if (translationOn) Color(0xFF7FD1A8) else Color(0xFF9AA4B2),
-                                fontSize = 11.sp,
-                                modifier = Modifier.clickable {
-                                    translationOn = !translationOn
-                                    status = if (translationOn) {
-                                        "已开启翻译：从这一句开始逐句翻译（之前几句保持原文）"
-                                    } else {
-                                        "已关闭翻译"
-                                    }
-                                }
-                            )
-                            Spacer(Modifier.width(12.dp))
                             // 常显「⇣ 最新」：点了就回到底部（已在底部时点了也无副作用），
                             // 不用判断 canScrollForward（在吸顶项里读它有时不触发重组）
                             if (segments.isNotEmpty()) {
