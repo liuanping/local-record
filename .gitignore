@@ -1,0 +1,53 @@
+﻿# 注意：.gitignore 不支持行尾注释，注释必须单独一行，否则整行都会被当成匹配模式
+
+# 虚拟环境 / 构建产物
+.venv/
+build/
+dist/
+dist-android/phone-files/
+
+# 源码快照 zip（110MB+ 一个，绝不能进版本库，否则 Gitee 直接拒绝推送）
+dist-android/*.zip
+
+# 打包好的 APK（默认不进库；最新那个用 ! 例外放行，见文件末尾）
+*.apk
+
+# 模型资源（体积大、可重新下载，不进版本库）
+storage/
+
+# Android 构建产物与缓存（含 CMake 的 .cxx 中间产物，几百 MB）
+android/app/build/
+android/app/.cxx/
+android/.gradle/
+android/build/
+android/local.properties
+
+# 预编译二进制依赖（体积大；重新获取见 README-android.md）
+android/app/libs/
+android/third_party/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本机临时文件 / 崩溃日志
+hs_err_pid*.log
+replay_pid*.log
+_mic_test*.wav
+
+# 与本项目无关的其它资料目录（不要把仓库搞乱）
+interview_coding_questions/
+nvidia_interview/
+python_handbook/
+rabies_guide/
+口算练习/
+json_reference/
+llama-b11274-bin-win-cpu-x64.zip
+.zcode/
+
+# 例外：允许提交最新版 APK（放在 Releases 里更好，见 README）
+!dist-android/LocalRecord-android-3.0.1.apk
+
+# 开发时的临时脚本（不进开源仓库）
+_*.py

@@ -1,0 +1,136 @@
+本地录音 · 源码快照说明
+========================
+
+版本：Android 2.3.8（对应 git 标签 android-v2.3.8）
+用途：**自包含源码快照**，解压后即可编译出 dist-android 里的那个 APK。
+
+本版新增（2.3.8，相对 2.3.7）
+------------------------------
+修好思维链关闭：MiniCPM5 的标记是 [Start thinking]…[End thinking]（不是 <think>），
+原来的判断从没匹配过 → 模型一直在先推理（20 多字花 32 秒）。现在 JNI 补空的思考块，
+两层都会剥离这两种标记；问答完成时显示用时。
+
+上一版新增（2.3.7，相对 2.3.6）
+------------------------------
+1. 生成结果只在弹窗显示：列表里不再内嵌「会议纪要 / AI 回答」块（文档问答页同理）。
+2. 点「录」开始新录音时自动清空上一次的转写与生成内容；文档问答选新图时清空上一张的结果。
+3. 吸顶行的「清空」也会关掉弹窗。
+
+上一版新增（2.3.6，相对 2.3.5）
+------------------------------
+1. 大模型结果改为弹窗显示（可滚动、可复制），不再混在转写列表里；关闭后可点「查看纪要/查看回答」再看。
+2. 提示词改为纯文本输出（不要 Markdown），并加 toPlainText() 兜底清洗，弹窗排版更整齐。
+3. 思维链：JNI 侧已关闭（补空 think 块）；本轮在 Kotlin 侧再加 stripThinking() 保险。
+
+上一版新增（2.3.5，相对 2.3.4）
+------------------------------
+界面精简：删掉底部「导入模型 / 选择大模型 / 清空 / 复制文字」四个按钮（模型自动下载，只留降噪开关）；
+复制改为与文档问答页一致的小链接「⧉ 复制」，整行吸顶（列表再长也够得着），清空同排放置，⇣ 最新常显。
+
+上一版新增（2.3.4，相对 2.3.3）
+------------------------------
+1. 实时转写自动滚到最新一段；用户上翻时暂停跟随，顶部「↓ 最新」一键回到底部。
+2. 列表右侧自绘拖动条（Compose 无内置滚动条），可按住上下拖快速翻长文字。
+3. 底部新增「复制文字」按钮（永远可见），一键把所有转写按 mm:ss 逐行复制到剪贴板；
+   OCR 文字、会议纪要、AI 回答也支持一键复制。
+
+上一版新增（2.3.3，相对 2.3.2）
+------------------------------
+修「有些话不展示」：改为**按 VAD 的人声证据判断**（逐 512 采样窗统计人声窗数/占比）——
+证据充分（≥8 窗且≥40%，实测真人语音是 132 窗/94%）就原样展示文字，包括"哈哈哈"；
+只有证据很弱时才启用"合成幻觉文本/长串重复字"兜底规则。黑名单改为完整短语。
+新增 TextFilter + 5 个单元测试锁住该行为。
+
+上一版新增（2.3.2，相对 2.3.1）
+------------------------------
+1. 修「漏第一个字」：给每段补回起点前 0.35 秒音频（环形缓冲，不重复上一段），
+   并把 VAD 阈值 0.5→0.45、最短语音 0.25→0.2 秒。实测段起点平均提前约 0.3 秒。
+2. 修正文案「点红色按钮开始录音」→「点右侧的圆形「录」按钮开始录音」。
+
+上一版新增（2.3.1，相对 2.3.0）
+------------------------------
+界面不再显示「就绪 / 未就绪」这类内部状态：能用就直接用，只有真的缺模型、需要下载时才提示下载
+（「模型不完整：还需下载 N 个文件」+ 进度条 + 可点的「继续下载」）。文档问答只留一句功能说明。
+
+上一版新增（2.3.0，相对 2.2.0）
+------------------------------
+1. 识别模型没加载完也能录音：音频先完整保存，模型就绪后自动接着识别，界面有明确提示。
+2. 麦克风权限：语音页红字提示 + 点录音弹系统授权 + 被拒后的引导弹窗（去设置 / 再试一次授权）。
+3. 文档问答去掉模型名，只讲功能。
+4. 修掉「明明能用却显示未就绪」的就绪判断（改为看模型文件是否已在手机上，并在启动时自动加载）。
+5. versionName / versionCode 修正为 2.3.0 / 230。
+
+上一版新增（2.2.0，相对 2.1.0）
+----------------------
+1. **导入外部音频转写**：录音库顶部「导入音频」，支持 mp3 / wav / m4a(aac) / ogg / opus /
+   flac / amr / 3gp（走系统 MediaExtractor + MediaCodec，手机能播放的就能转写），导入后自动转写。
+   实测 ogg/flac/mp3 三种格式解码长度均精确等于源文件的 5.30 秒。
+2. **录音库做成普通录音机**：显示完整路径（点击可复制）、删除（二次确认）、
+   播放/暂停/继续/停止 + 可拖动进度条与时间显示。
+3. **新应用图标**：全密度自适应图标（含 monochrome 主题图标层），
+   生成脚本 scripts/make_app_icon.py，预览 dist-android/app-icon-preview.png。
+
+与 git 仓库的区别
+------------------
+git 仓库（本目录下的 .git）只跟踪**源码**（约 120 个文件 / 2 MB），把体积大但可重新获取的
+东西排除在外（见 .gitignore）：
+  * 模型（storage/，约 2.6GB）
+  * 预编译依赖（android/app/libs/sherpa-onnx.aar，54MB）
+  * 第三方源码（android/third_party/llama.cpp，203MB）
+  * 构建产物（android/app/.cxx、app/build、.gradle）
+  * APK（dist-android/*.apk）
+
+本 zip 快照**额外包含**了上面这些（除模型和构建产物），所以解压即可编译。
+
+里面有什么
+----------
+  app/                    电脑版（Windows）Python 源码 + 全部自检脚本
+  android/                Android 版源码
+    app/src/main/java/      录音/ASR/标点/OCR/大模型/VAD/音频导入解码/下载/前台服务
+    app/src/main/cpp/       JNI：llm_jni.cpp（llama.cpp）、ocr_jni.cpp（ORT C API）
+    app/src/main/assets/    OCR 识别字典（18708 字符）
+    app/src/main/res/       应用图标（全密度）
+    app/src/test/           JVM 单元测试（VAD 断句、音频质量判据，共 9 个用例）
+    app/libs/               sherpa-onnx.aar（预编译依赖）
+    third_party/llama.cpp/  交叉编译用的 llama.cpp 源码（来自 llama-cpp-python 0.3.36 源码包）
+  scripts/                验证脚本（ASR 对比、VAD 对比、Silero 测试、图标生成、OCR 参数提取…）
+  dist-android/           已构建好的 APK + 图标/界面预览图
+  installer/              Windows 安装包脚本（Inno Setup）
+  config.yaml / docs/     电脑版配置与设计文档
+  README-windows.md       电脑版说明
+  android/README-android.md  Android 版说明（含完整版本记录 1.2.0 → 2.2.0）
+
+怎么重新编译 Android 版
+------------------------
+工具链（都在 E 盘）：
+  E:\android-dev\jdk           JDK 17
+  E:\android-dev\sdk           Android SDK + NDK r27 + cmake 3.22.1
+  E:\android-dev\gradle        Gradle 8.9
+  E:\android-dev\gradle-home   Gradle 缓存
+
+  $env:JAVA_HOME        = "E:\android-dev\jdk"
+  $env:ANDROID_HOME     = "E:\android-dev\sdk"
+  $env:GRADLE_USER_HOME = "E:\android-dev\gradle-home"
+  & "E:\android-dev\gradle\bin\gradle.bat" --no-daemon -p android assembleRelease
+
+  单元测试（不需要模拟器）：
+  & "...\gradle.bat" --no-daemon -p android :app:testDebugUnitTest
+
+如果 android/third_party/llama.cpp 缺失（例如只从 git 检出源码），用这个命令补回来：
+  pip download llama-cpp-python==0.3.36 --no-binary :all:
+  然后解压 tar.gz，把 vendor/llama.cpp 的内容放到 android/third_party/llama.cpp/
+
+模型（不在此快照中，可重新下载）
+--------------------------------
+App 首次运行会自己从 ModelScope 下载（转写 227MB / 标点 285MB / OCR 132MB /
+神经网络断句 2.3MB / 大模型 1.49GB）。电脑版模型在 storage/ 下（已排除），来源见 README-windows.md。
+
+自检入口（不需要 UI，可自动化验证）
+----------------------------------
+  adb shell am start -n com.localrecord.app/.MainActivity --ez livetest true --ez nodownload true
+      → 实时转写：3 遍语音 + 第二个会话 + 12 秒纯噪声（期望噪声 0 段）
+  adb shell am start -n com.localrecord.app/.MainActivity --ez audiotest true --ez nodownload true
+      → 导入解码：files/audiotest.{ogg,flac,mp3}
+  adb shell am start -n com.localrecord.app/.MainActivity --ez ocrtest true --ez nodownload true
+  adb shell am start -n com.localrecord.app/.MainActivity --ez downloadtest true
+  结果写到 /sdcard/Android/data/com.localrecord.app/files/*-result.txt

@@ -1,0 +1,208 @@
+# ============================================================
+# Local Record（Windows 版）配置文件
+# ------------------------------------------------------------
+# 所有 storage 相对路径均以应用根目录下的 storage/ 为基准：
+#   开发版：项目根目录/storage/
+#   打包版：LocalRecord.exe 同级目录/storage/
+# 可用环境变量 LOCAL_RECORD_DIR 强制指定资源根目录
+# （例如把模型放在 D:\models 时，指向含 storage/ 的目录即可）。
+# ============================================================
+
+app:
+  name: "Local Record"
+  version: "1.0.0"
+
+# ---------------- 界面 ----------------
+ui:
+  theme: "dark"              # dark（默认，深色玻璃）/ light（浅色）
+                             # 在界面上点 ☀/☾ 切换后，选择会被记住（QSettings）
+
+# ---------------- 播放（试听录音） ----------------
+player:
+  device: null               # null = 系统默认输出设备
+  volume: 0.8                # 初始音量 0~1
+  autoplay_after_stop: false # 停止录音后是否自动回放刚才那一段
+
+# ---------------- llama-server（llama.cpp） ----------------
+llama_server:
+  # llama.cpp 版本标签。Windows 用 win-x64 包；b9500+ 用更新的 SDK 编译，
+  # 如遇问题可回退 b9000（与 macOS 版一致）。
+  release_tag: "b11274"
+  host: "127.0.0.1"
+  port: 8091
+  # 坑 4：startup_timeout_sec 只用于进度估算；进程还活着就继续等，
+  # 硬上限是 hard_timeout_sec（600s）。
+  startup_timeout_sec: 300
+  hard_timeout_sec: 600
+  ctx_size: 16384            # 上下文总量：要给 4096 的输出留出空间（KV 用 q8_0，约 +170MB 内存）
+  threads: 0                 # 0 = 自动
+  gpu_layers: 0              # CPU 构建用 0；如使用 CUDA 构建可改为 999
+  # 单次输出上限：模型回答完会自己停，这个值只是"别被截断"的上限。
+  # 设 4096 后，长摘要也能完整输出（代价：极端情况下最坏要等几分钟，客户端超时已放宽到 30 分钟）。
+  max_new_tokens: 4096
+  # 思维链（CoT）：MiniCPM5 的对话模板支持 enable_thinking。
+  # **实测（同一段会议转写、i5-8250U）**：
+  #   关：29.9s、134 token 输出，摘要 4 点覆盖全部关键信息
+  #   开：71.1s、409 token 输出（含 453 字思考），摘要 7 点但关键信息基本一致
+  # 本机 CPU 推理下开思维链约慢 2.4 倍，摘要/问答质量提升有限，所以默认关闭。
+  # 想开就改成 true（复杂推理类问题可以试试），界面无需改动。
+  # ⚠ 开了之后**必须同时调大 max_new_tokens**（建议 ≥ 1024）：思考内容也占输出额度，
+  #   否则正式回答会被截断（实测上限 220 token 时，摘要只剩 59 字就没了）。
+  enable_thinking: false
+  # 内存/速度调优（8GB 内存笔记本实测有效，对效果无损，想还原就改回 []）：
+  #   -ctk q8_0 -ctv q8_0  KV cache 8bit 量化：8192 上下文下 KV 从 1.18GB 降到约 0.6GB
+  #   -fa on               flash attention：预填充更快、KV 更省
+  # 实测（i5-8250U + 8GB，Qwen3-4B Q4_K_M）：
+  #   冷启动 56.9s → 33.1s ｜ 预填充 16.8 → 19.8 tok/s ｜ 峰值内存 3.24 → 2.94 GB
+  extra_args: ["-ctk", "q8_0", "-ctv", "q8_0", "-fa", "on"]
+
+# ---------------- LLM 模型 ----------------
+model:
+  # 必须与 storage/models/ 目录里的文件完全一致，否则打包脚本会报错
+  # MiniCPM5-2B：1.45GB，实测冷启动 9.9s / 生成 8.2 tok/s / 峰值内存 2.48GB（需 llama.cpp b11274+）
+  # 想换回 4B：把下面改成 "Qwen3-4B-Q4_K_M.gguf"
+  filename: "MiniCPM5-2B-Q4_K_M.gguf"
+
+# ---------------- ASR（sherpa-onnx） ----------------
+asr:
+  sample_rate: 16000
+  # ASR 引擎：paraformer（默认）/ sense_voice
+  # 实测同一段 60 秒中文会议语音（209 字标准答案）的字错率 CER：
+  #   Paraformer zh int8（227MB） 8 秒切分 **1.9%**，用时 3.3s  ← 默认，中文最准
+  #   SenseVoice f32   （929MB） 8 秒切分 2.9%，用时 5.6s
+  #   SenseVoice int8  （226MB） 8 秒切分 3.3%，用时 4.4s
+  # 差别肉眼可见：Paraformer 认对「联调/测试用例」，SenseVoice 写作「联条/测试用力」。
+  # 代价：Paraformer 只支持中文；要中英日韩粤混说就改回 sense_voice。
+  # 复现：scripts/compare_asr_models.py
+  backend: paraformer
+  # 每攒够这么多秒音频转写一段。**段长直接影响准确率**（都是离线模型）。
+  # 实测（Paraformer，同一段 60 秒会议语音、209 字标准答案）：
+  #   整段一次 2.9% ｜ 8 秒/段 **1.9%** ｜ 4 秒/段略高 ｜ 15 秒/段 4.3%
+  # 默认 8 秒：准确率最好，文字仍是边录边出。
+  chunk_seconds: 8.0
+  # 静音判定：一段音频里"有声帧占比"低于此值就**不送识别**（解决"没人说话却识别出文字"）。
+  # 实测本机：有人说话 21%~63%，纯噪声/静音 0%~1%，所以 0.06 有 3 倍以上余量。
+  # 偶尔漏掉极短的插话就把这个值调小（如 0.03）；幻觉太多就调大（如 0.10）。
+  speech_min_ratio: 0.06
+  # 中文首选：Paraformer（非自回归，快且准）
+  paraformer:
+    model_dir: "asr/paraformer"
+    model_filename: "model.int8.onnx"
+    tokens_filename: "tokens.txt"
+  # 备选：SenseVoice（中英日韩粤多语种）。**默认不打包**（省 226MB）：实测中文和中英混说
+  # 都不如 Paraformer，只有需要日/韩/粤时才值得。要用就先按 README 地址把模型放进
+  # storage/asr/sense-voice/，再把上面的 backend 改成 sense_voice。
+  sense_voice:
+    model_dir: "asr/sense-voice"
+    model_filename: "model.int8.onnx"
+    tokens_filename: "tokens.txt"
+    language: "zh"
+    use_itn: true
+
+  # 标点恢复（CT-Transformer）：ASR 只输出纯文字、不带标点，这一步负责补上「，。？！」。
+  # 约 285MB（fp32），加载约 2s，每段推理 0.01~0.04s。
+  # 不想用就把 enabled 改成 false（或删掉 storage/asr/punct 目录，会自动降级）。
+  punctuation:
+    enabled: true
+    model_dir: "asr/punct"
+    model_filename: "model.onnx"
+    tokens_filename: "tokens.json"
+
+# ---------------- 录音（sounddevice） ----------------
+recorder:
+  device: null               # null = 系统默认输入设备；可填设备名或索引
+  # 落盘时整体增益归一化（只乘一个系数，波形形状不变）：麦克风电平低时，
+  # 原始 wav 回听会很小声（实测本机说话帧只有 -25dBFS），打开后音量正常。
+  # 识别链路本来就按段归一化，所以这项只影响"回听"，不影响识别率。
+  # 想保留原始电平（比如要做声学分析）就改成 false。
+  normalize_save: true
+  sample_rate: 16000
+  channels: 1
+  dtype: "int16"
+  save_wav: true             # true：录音存到 recordings/（出现在录音库，可试听/删除）
+                             # false：只落在临时目录（仍可立即回放，不进录音库，自动清理）
+
+# ---------------- OCR（PaddleOCR PP-OCRv6，ONNX Runtime） ----------------
+ocr:
+  # Windows 版默认不装 paddlepaddle，走 ONNX Runtime：
+  #   auto/onnx → engine=onnxruntime；paddle → engine=paddle_static（需装 paddlepaddle）
+  backend: "auto"
+  det_model: "PP-OCRv6_medium_det"
+  rec_model: "PP-OCRv6_medium_rec"
+  device: "cpu"
+  use_doc_orientation_classify: false
+  # 方向分类模型（PP-OCRv5_mobile_textline_orientation）不在离线包里，
+  # 保持 false 才能完全离线；需要时下载对应模型到 storage/ocr/official_models 再开
+  use_textline_orientation: false
+  pdf_dpi: 200               # PDF 渲染分辨率
+
+# ---------------- LLM Prompt 模板 ----------------
+# {transcript} 会被替换为带时间戳与编号的转写文本；
+# {question}  会被替换为用户问题。
+prompts:
+  # 会议纪要：按结构化格式输出（重点 / 待办 / 风险 / 决议），而不是一段流水摘要。
+  # 要求模型"只依据转写、不编造"，没提到的写"未提及"，并保留时间点便于回听。
+  # 注意：要求放在模板**之前**、模板里的字段留空，否则 2B 模型会把括号里的说明
+  # 原样抄进正文（实测踩过）。
+  summarize: |
+    你是专业的会议纪要整理助手。下面是一次录音的转写文本（每段格式：[编号] HH:MM:SS 文本）：
+
+    {transcript}
+
+    请把上面内容整理成**会议纪要**，用 Markdown 输出，严格按下面的模板填写
+    （模板里的「填写要求」是给你看的说明，不要把说明抄进正文，直接写内容）：
+
+    ## 会议纪要
+    **一句话概述**：
+
+    ### 一、重点内容
+
+    ### 二、待办事项
+
+    ### 三、风险与问题
+
+    ### 四、决议与结论
+
+    各节填写要求：
+    - **一句话概述**：30 字以内说清这次会议/录音讲了什么；
+    - **一、重点内容**：按主题分条（每行以「- 」开头），一条一句话；
+      涉及数字、金额、比例、版本、时间点必须原样保留；同一主题合并，不要流水账；
+      只写"讨论了什么"，不要重复第三、四节的内容；
+    - **二、待办事项**：用 Markdown 表格，表头固定为
+      「| 事项 | 负责人 | 时间要求 |」，并且**必须**在表头下面写一行
+      「|---|---|---|」，然后每条待办写一行表格；
+      只写转写里明确提到的待办/承诺/安排，没提到的负责人或时间写"未提及"，
+      不要编造；没有待办就写一行"本次未提及待办事项"；
+    - **三、风险与问题**：阻塞、风险、线上问题、外部依赖，写清影响与当前状态；
+    - **四、决议与结论**：只写已明确拍板的决定；只是"安排了某件事"请放到第二节；
+      没有明确决议就写"本次未形成明确决议"。
+
+    另外：只使用转写中的信息，**绝对不要编造**未出现的人名、数字或结论；
+    听不清或明显有误的词按上下文合理修正，拿不准就保留原样；
+    关键信息后可标注时间点（如 00:12:30）；全文用中文，不要输出思考过程。
+  qa: |
+    你是本地录音转写助手。下面是录音转写文本（每段带时间戳与编号）：
+    {transcript}
+    用户问题：{question}
+    请只基于上述转写内容回答；如果转写中没有相关信息，请明确说明"转写中没有提到"。
+  locate: |
+    下面是录音转写文本（每段格式：[编号] HH:MM:SS 文本）：
+    {transcript}
+    用户问题：{question}
+    请找出与问题最相关的转写段落。输出格式（每段一行）：
+    [编号] 起始时间 该段文本
+    如果完全没有相关信息，只输出：无相关内容
+  # ---- OCR 文本专用 ----
+  ocr_qa: |
+    下面是从图片/PDF 识别出的文本：
+    {text}
+    用户问题：{question}
+    请只基于上面的文本回答；如果里面没有相关信息，请明确说明。
+  ocr_summarize: |
+    下面是从图片/PDF 识别出的文本：
+    {text}
+    请用中文输出简洁摘要（200 字以内），并分点列出关键信息。
+
+# ---------------- 日志 ----------------
+logging:
+  level: "INFO"

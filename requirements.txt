@@ -1,0 +1,26 @@
+# ============================================================
+# Local Record（Windows x64）依赖
+# 版本与 macOS 版保持一致（实测关键版本见注释）
+# ============================================================
+PySide6==6.11.1
+sounddevice==0.5.5
+# sherpa-onnx：实测 1.13.5（ASR 代码按 1.13 的 from_sense_voice 工厂 API 编写）
+sherpa-onnx>=1.13.0,<2.0.0
+paddleocr==3.7.0
+paddlex==3.7.2
+onnxruntime>=1.20.0
+opencv-contrib-python==4.10.0.84
+httpx==0.28.1
+numpy>=1.26.0,<2.3.0
+PyYAML>=6.0.1
+pypdfium2>=4.30.0        # OCR 的 PDF 渲染
+pillow>=10.0.0
+cffi>=1.16.0             # sounddevice 运行所需
+pyinstaller==6.21.0
+
+# 说明：
+# - 若 OCR 走 ONNX 后端且不想装 paddlepaddle 这个大件，可自行删除；
+#   paddlex 3.x 在 Windows 上可能作为依赖自动安装 paddlepaddle。
+# - conda-forge 环境（miniforge）：打包脚本会自动处理 _ssl 的
+#   libssl-3-x64.dll / libcrypto-3-x64.dll 问题（对应 macOS 坑 2）。
+# - python.org 官方 Python 将 OpenSSL 静态链进 _ssl.pyd，无需处理。

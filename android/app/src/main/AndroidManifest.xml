@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 应用内下载模型需要联网；下载在后台跑（前台服务 + 通知），所以还要 FOREGROUND_SERVICE_* -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="本地录音"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LocalRecord">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:label="本地录音">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 下载模型期间的前台服务：切到别的 app / 锁屏也能继续下 -->
+        <service
+            android:name=".DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 录音期间的前台服务（microphone 类型）：否则切到后台约 30 秒就拿不到麦克风数据 -->
+        <service
+            android:name=".MicService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- 通知栏「停止录音」按钮 -->
+        <receiver
+            android:name=".StopRecordReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.localrecord.app.STOP_RECORDING" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
