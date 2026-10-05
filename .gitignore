@@ -47,7 +47,7 @@ llama-b11274-bin-win-cpu-x64.zip
 .zcode/
 
 # 例外：允许提交最新版 APK（放在 Releases 里更好，见 README）
-!dist-android/LocalRecord-android-3.1.2.apk
+!dist-android/LocalRecord-android-3.1.3.apk
 
 # 开发时的临时脚本（不进开源仓库）
 _*.py

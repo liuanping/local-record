@@ -1316,28 +1316,36 @@ class MainActivity : ComponentActivity() {
                         }
                         Text(
                             if (recording) liveInfo.ifEmpty { "已出 0 段" }
-                            else "点圆钮开始录音，自动断句、自动出字",
+                            else "点「录音」，自动断句出字",
                             color = if (recording && (recorder?.error != null)) Color(0xFFE05B5B)
                             else Color(0xFF9AA4B2),
                             fontSize = 9.sp, maxLines = 2
                         )
                     }
                     Spacer(Modifier.width(10.dp))
+                    // 录音按钮：和右边的翻译按钮做成**同一形状语言**（都是 52dp 高的胶囊、同圆角），
+                    // 只是录音更宽、用主色填充，主次分明但视觉统一
                     Button(
                         onClick = { toggleRecord() },
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(26.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (recording) Color(0xFFE05B5B) else Accent
                         ),
-                        modifier = Modifier.size(52.dp),
+                        modifier = Modifier.height(52.dp).width(104.dp),
                         contentPadding = PaddingValues(0.dp)
-                    ) { Text(if (recording) "停" else "录", color = Color.White) }
-                    Spacer(Modifier.width(14.dp))
-                    // 翻译开关：录音圆钮右边的胶囊按钮（单行、有底色、字号大，一眼能看见）
+                    ) {
+                        Text(
+                            if (recording) "停止" else "录音",
+                            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    // 翻译开关：与录音按钮同高同圆角的胶囊（开=绿底，关=深灰底）
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(22.dp))
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(26.dp))
                             .background(
                                 if (translationOn) Color(0xFF1E6B49) else Color(0xFF232A36)
                             )
