@@ -9,8 +9,8 @@
 
 | 渠道 | 下载 APK | 发行版页面 |
 |---|---|---|
-| **Gitee**（国内直连）⭐ | [LocalRecord-android-3.1.3.apk](https://gitee.com/liuanping100/local-record/releases/download/v3.1.3/LocalRecord-android-3.1.3.apk) | [v3.1.3](https://gitee.com/liuanping100/local-record/releases/tag/v3.1.3) |
-| GitHub | [LocalRecord-android-3.1.3.apk](https://github.com/liuanping/local-record/releases/download/v3.1.3/LocalRecord-android-3.1.3.apk) | [v3.1.3](https://github.com/liuanping/local-record/releases/tag/v3.1.3) |
+| **Gitee**（国内直连）⭐ | [LocalRecord-android-3.1.4.apk](https://gitee.com/liuanping100/local-record/releases/download/v3.1.4/LocalRecord-android-3.1.4.apk) | [v3.1.4](https://gitee.com/liuanping100/local-record/releases/tag/v3.1.4) |
+| GitHub | [LocalRecord-android-3.1.4.apk](https://github.com/liuanping/local-record/releases/download/v3.1.4/LocalRecord-android-3.1.4.apk) | [v3.1.4](https://github.com/liuanping/local-record/releases/tag/v3.1.4) |
 
 安装：下载后点击安装（首次可能提示"未知来源"，允许即可）；首次打开会自动下载模型（转写+标点+断句约 514MB，
 翻译模型 397MB，建议 WiFi）。

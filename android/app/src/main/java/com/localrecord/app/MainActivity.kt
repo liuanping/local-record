@@ -1154,6 +1154,24 @@ class MainActivity : ComponentActivity() {
                     },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) { Text(if (enhanceOn) "降噪 开" else "降噪 关", fontSize = 11.sp) }
+                Spacer(Modifier.width(14.dp))
+                // 小按钮：复制**不带时间戳**的转写结果（列表顶部的 ⧉ 复制 是带时间戳的，两种都留着）
+                Text(
+                    if (textCopied) "已复制 ✓" else "⧉ 去除时间戳",
+                    color = if (textCopied) Color(0xFF66D19E) else Accent,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable {
+                        if (segments.isEmpty()) {
+                            status = "还没有转写内容"
+                        } else {
+                            copyPlain(
+                                segments.joinToString("\n") { it.text },
+                                "转写文字（不含时间戳）"
+                            )
+                            textCopied = true
+                        }
+                    }
+                )
             }
             Text(
                 "本地录音：录音转写与逐句翻译全部在手机本地完成，不联网、不上传任何内容。代码完全开源，安全放心。",

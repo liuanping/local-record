@@ -167,8 +167,8 @@ class ModelStore(private val context: Context) {
      * 真的缺模型时，由界面上的「继续下载」入口 + 下载进度条来提示。
      */
     fun statusText(): String = when {
-        asrReady() && punctReady() -> "点圆钮开始录音，自动断句、自动出字"
-        asrReady() -> "点圆钮开始录音（标点模型还没下完，先出不带标点的文字）"
-        else -> "点圆钮开始录音，转写能力需要先下载模型"
+        asrReady() && punctReady() -> "点「录音」开始，自动断句、自动出字"
+        asrReady() -> "点「录音」开始（标点模型还没下完，先出不带标点的文字）"
+        else -> "点「录音」开始，转写能力需要先下载模型"
     }
 }

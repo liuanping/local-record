@@ -12,8 +12,8 @@ android {
         applicationId = "com.localrecord.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 313
-        versionName = "3.1.3"
+        versionCode = 314
+        versionName = "3.1.4"
         ndk {
             // ABI 由下面的 splits 决定（这里不能再写 abiFilters，否则和 splits 冲突）
         }
