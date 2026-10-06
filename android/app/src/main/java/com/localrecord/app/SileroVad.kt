@@ -34,7 +34,7 @@ class SileroVad(private val store: ModelStore) {
         private const val WIN = 512
 
         /** 判定阈值：0.5 是官方推荐起点；这里用 0.45 让它**更早**发现语音起点（少漏字） */
-        private const val THRESHOLD = 0.45f
+        private const val THRESHOLD = 0.38f
 
         /** 停这么久没声就算一段结束 */
         private const val MIN_SILENCE = 0.6f
@@ -50,7 +50,7 @@ class SileroVad(private val store: ModelStore) {
          *
          * 补白不超过上一段的结束位置，所以不会重复内容。
          */
-        private const val PREROLL_SEC = 0.35f
+        private const val PREROLL_SEC = 0.7f
     }
 
     private var vad: Vad? = null

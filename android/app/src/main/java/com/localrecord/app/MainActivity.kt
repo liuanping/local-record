@@ -821,6 +821,8 @@ class MainActivity : ComponentActivity() {
             if (ok) {
                 for (s in listOf(
                     "今天的会议改到下午三点，请大家准时参加。",
+                    "交付时间不变，风险我这边盯着。",
+                    "头盔",
                     "Please send me the updated report by Friday."
                 )) {
                     val t1 = System.currentTimeMillis()

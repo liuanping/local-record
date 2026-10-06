@@ -33,6 +33,8 @@ struct LlmHandle {
     long long last_gen_ms = 0;
     int last_prompt_tokens = 0;
     int last_gen_tokens = 0;
+    // 上一次的完整 prompt token（用于前缀 KV 复用：系统提示词固定，只有最后一句在变）
+    std::vector<llama_token> cached_tokens;
 };
 
 std::string jstr(JNIEnv *env, jstring s) {
@@ -232,7 +234,31 @@ std::string generate_impl(LlmHandle *h, const std::string &prompt, int max_token
     int start = 0;
     if (n > budget) {
         start = n - budget;
+        h->cached_tokens.clear();          // 截断过就不做前缀复用，避免位置对不上
         LOGI("提示词过长：%d token，截断到 %d（丢掉前 %d）", n, budget, start);
+    }
+
+    // ---- 前缀 KV 缓存复用 ----
+    // 系统提示词是固定的，每次只有最后那句用户文本不同。找出与上一次相同的 token 前缀，
+    // 只重新计算不同的部分（省掉重复的预填充，实测能快一倍以上）。
+    // 注意：别整段都当缓存，至少留 1 个 token 要算，否则会空转。
+    {
+        int n_common = 0;
+        const int cap = std::min((int) h->cached_tokens.size(), n);
+        while (n_common < cap && h->cached_tokens[(size_t) n_common] == tokens[(size_t) n_common]) {
+            n_common++;
+        }
+        if (n_common >= n) n_common = n - 1;
+        if (n_common < start) n_common = 0;          // 被截断过就不复用
+        llama_memory_t mem = llama_get_memory(h->ctx);
+        if (n_common > 0) {
+            llama_memory_seq_rm(mem, 0, n_common, -1);   // 只丢掉不同的尾巴，公共前缀留在缓存里
+            LOGI("前缀 KV 复用：%d/%d token 命中缓存，只重算 %d 个", n_common, n, n - n_common);
+        } else {
+            llama_memory_clear(mem, true);
+            LOGI("没有公共前缀，清空上下文重算");
+        }
+        start = n_common;
     }
 
     // ---- 采样器：greedy ----
@@ -292,6 +318,9 @@ std::string generate_impl(LlmHandle *h, const std::string &prompt, int max_token
     }
     // 把"生成多少 token、花了多久、多快"打出来 —— 判断"慢"到底是推理太多还是机器本身慢，
     // 看这行就够：token 数 ≈ 30 却要 30 秒 = 机器慢；token 数 150+ = 模型在推理。
+    // 记录本次 prompt 的 token，下次找公共前缀用
+    h->cached_tokens.assign(tokens.begin(), tokens.end());
+
     h->last_gen_ms = now_ms() - t_gen;
     h->last_gen_tokens = generated;
     const double sec = h->last_gen_ms / 1000.0;

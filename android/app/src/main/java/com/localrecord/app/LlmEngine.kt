@@ -151,26 +151,48 @@ fun minutesPrompt(transcript: String): String = """
     private fun looksChinese(s: String): Boolean =
         s.any { it.code in 0x3400..0x9FFF || it.code in 0xF900..0xFAFF }
 
+    /**
+     * 短词（≤6 字）专用的"词典式"提示词：**故意不给例子** ——
+     * 给例子会被小模型抄成万能答案（每句都 helmet），不给例子整句又会退化成查词，
+     * 所以只对短词用它（实测「头盔」→ helmet 稳定）。
+     */
+    private val DICT_EN = "You are a Chinese-English dictionary. The user sends a Chinese word. " +
+        "Reply with its English meaning only: one word, no Chinese, no explanation, no quotes."
+    private val DICT_ZH = "You are an English-Chinese dictionary. The user sends an English word. " +
+        "Reply with its Chinese meaning only, no English, no explanation, no quotes."
+
     fun translate(text: String, maxTokens: Int = 220): String {
-        val src = text.trim()
+        var src = text.trim()
         if (src.isEmpty()) return ""
+        // 很短的输入先去句末标点："头盔。" → "头盔"（标点会让小模型开始"造句"）
+        if (src.length <= 6) src = src.trimEnd('。', '，', '！', '？', '.', ',', '!', '?', '、', ';', '；')
         val toEnglish = looksChinese(src)
-        var out = generate(
-            if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
-            src,
-            maxTokens
-        ).trim()
-        // 0.6B 小模型偶尔"原样返回"（该译成中文却还是英文）。换个更直接的说法重试一次。
+        val short = src.length <= 6
+        val sys = when {
+            short && toEnglish -> DICT_EN
+            short -> DICT_ZH
+            toEnglish -> TRANSLATE_TO_EN
+            else -> TRANSLATE_TO_ZH
+        }
+        var out = generate(sys, src, maxTokens).trim()
+        // 0.6B 小模型偶尔"原样返回"或"半翻半留"（头盔 → head 盔）。换个更直接的说法重试一次。
         val wrongLanguage = if (toEnglish) {
-            looksChinese(out)                                  // 要英文却给了中文
+            looksChinese(out)
         } else {
-            out.isNotBlank() && !looksChinese(out)             // 要中文却还是英文
+            out.isNotBlank() && !looksChinese(out)
         }
         if (wrongLanguage) {
             Log.i(TAG, "翻译语言不对，换问法重试：${out.take(30)}")
             out = generate(
-                if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
-                (if (toEnglish) RETRY_TO_EN else RETRY_TO_ZH) + src,
+                if (short) {
+                    if (toEnglish) "What is the English word for the Chinese word the user sends? " +
+                        "Reply with the English word only."
+                    else "What is the Chinese word for the English word the user sends? " +
+                        "Reply with the Chinese word only."
+                } else {
+                    if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH
+                },
+                src,
                 maxTokens
             ).trim()
         }
