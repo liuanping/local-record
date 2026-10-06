@@ -1155,9 +1155,10 @@ class MainActivity : ComponentActivity() {
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) { Text(if (enhanceOn) "降噪 开" else "降噪 关", fontSize = 11.sp) }
                 Spacer(Modifier.width(10.dp))
-                // 去时间戳复制：和「降噪」做成同款按钮（同样的内边距/字号），
-                // 但用主色描边+文字区分开，一眼看出是两个不同动作
-                OutlinedButton(
+                // 去时间戳复制：**实心绿色**按钮，比描边醒目得多（用户反馈"颜色不够明显"）；
+                // 选绿色而不是红色 —— 红色在这个 App 里已经代表"停止录音/出错"，避免混淆。
+                // 尺寸/内边距/字号和「降噪」保持一致，所以并排看着协调。
+                Button(
                     onClick = {
                         if (segments.isEmpty()) {
                             status = "还没有转写内容"
@@ -1169,15 +1170,15 @@ class MainActivity : ComponentActivity() {
                             textCopied = true
                         }
                     },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp, if (textCopied) Color(0xFF66D19E) else Accent
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (textCopied) Color(0xFF66D19E) else Accent
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (textCopied) Color(0xFF2E9E6B) else Color(0xFF1E8A5A)
                     )
                 ) {
-                    Text(if (textCopied) "已复制 ✓" else "去时间戳复制", fontSize = 11.sp)
+                    Text(
+                        if (textCopied) "已复制 ✓" else "去时间戳复制",
+                        color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                    )
                 }
             }
             Text(
