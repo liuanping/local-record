@@ -138,7 +138,10 @@ class MainActivity : ComponentActivity() {
 
     private fun startTranslateWorker() {
         if (!translateRunning.compareAndSet(false, true)) return
-        io.execute {
+        // 翻译跑在**独立线程**里，并压到最低优先级 ——
+        // 绝不和识别抢 CPU（用户反馈：翻译一开，识别就丢字）
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 while (true) {
                     val (idx, text) = translateQueue.poll() ?: break
@@ -159,12 +162,18 @@ class MainActivity : ComponentActivity() {
                 translateRunning.set(false)
                 if (translateQueue.isNotEmpty()) startTranslateWorker()
             }
-        }
+        }, "translate").start()
     }
 
     /** 静默加载大模型：不覆盖转写状态栏（首次要读约 400MB，几秒钟） */
     private fun ensureLlmQuiet(): Boolean {
         if (llm.ready) return true
+        // ★ 录音期间**绝不**加载大模型：加载要读 378MB、分配几百 MB 内存，
+        //   会把录音线程拖垮（用户实测：识别不出字了）。等录音停下再翻。
+        if (recording) {
+            runOnUiThread { status = "正在录音，翻译稍后进行（避免影响识别）" }
+            return false
+        }
         if (llm.findModel() == null) {
             runOnUiThread { status = "翻译模型还没下载好，下完会自动开始翻译" }
             return false
@@ -1388,6 +1397,23 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     "已关闭翻译"
                                 }
+                                // 不在录音时顺手把模型热好：这样真开始录音时它已经在内存里，
+                                // 不会出现"说到一半才去加载模型、把识别拖垮"的情况
+                                if (translationOn && !recording && !llm.ready && llm.findModel() != null) {
+                                    status = "正在后台加载翻译模型（不影响录音）…"
+                                    Thread({
+                                        android.os.Process.setThreadPriority(
+                                            android.os.Process.THREAD_PRIORITY_BACKGROUND
+                                        )
+                                        val ok = try {
+                                            llm.init()
+                                        } catch (_: Throwable) {
+                                            false
+                                        }
+                                        llmReady = ok
+                                        runOnUiThread { status = if (ok) "翻译模型已就绪" else "翻译模型加载失败" }
+                                    }, "llm-warmup").start()
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 11.dp)
                     ) {
@@ -1769,6 +1795,22 @@ class MainActivity : ComponentActivity() {
                 status = "已保存 ${file.name}（${file.length() / 1024} KB，峰值 ${peakDb}dB）" +
                     if (peakDb < -45) "　⚠ 几乎没收到声音，检查麦克风权限/是否被其他应用占用" else ""
             } else status = "这次没有采到音频"
+            // 录音结束：这时才允许加载大模型，把录音期间没翻的句子补上
+            // （录音期间故意不加载、不推理，避免和识别抢 CPU/内存）
+            if (translationOn && segments.isNotEmpty() && llm.findModel() != null) {
+                Thread({
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                    if (llm.ready || llm.init()) {
+                        llmReady = true
+                        runOnUiThread {
+                            status = "录音结束，正在补翻 ${segments.size} 句…"
+                            segments.forEachIndexed { i, s ->
+                                if (!translations.containsKey(i)) enqueueTranslation(i, s.text)
+                            }
+                        }
+                    }
+                }, "llm-catchup").start()
+            }
             return
         }
         // 没有麦克风权限：当场申请，并在状态栏说清楚为什么（用户不一定知道要先授权）

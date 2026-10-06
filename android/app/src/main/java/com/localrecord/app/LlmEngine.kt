@@ -15,7 +15,7 @@ class LlmEngine(private val store: ModelStore) {
 
     companion object {
         private const val TAG = "LlmEngine"
-        const val CONTEXT = 4096
+        const val CONTEXT = 1024
 
         /** 会议纪要模板（与电脑版 config.yaml 的 summarize 能力对齐，精简版） */
         val MINUTES_SYSTEM = """
@@ -290,7 +290,7 @@ fun minutesPrompt(transcript: String): String = """
 
     /** 线程数：按 CPU 核数来（预填充最吃多核），最多 6 个，留点核给界面 */
     private fun defaultThreads(): Int =
-        Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+        Runtime.getRuntime().availableProcessors().coerceIn(2, 3)
 
     /** 上一次生成的分段耗时（"理解 x.xs / 生成 y.ys"），用于界面显示 */
     val lastStats: String
