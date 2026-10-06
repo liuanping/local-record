@@ -210,6 +210,12 @@ long long now_ms() {
 /** 生成核心（两个 JNI 入口共用） */
 std::string generate_impl(LlmHandle *h, const std::string &prompt, int max_tokens,
                           const std::string &stop) {
+    // ★ 关键：每次生成前**清空上下文**。
+    //   不清的话，本次 prompt 会接在上一次的 prompt+回答后面，模型会顺着上一次的答案继续编
+    //   —— 表现就是"每句都翻成同一个词"（用户真机实测：三段转写全被翻成 helmet）。
+    llama_memory_clear(llama_get_memory(h->ctx), true);
+    LOGI("已清空上下文（KV 缓存），本次为独立的一次生成");
+
     const long long t_gen = now_ms();      // 只统计"生成"耗时（预填充算在 prompt 里）
     // ---- 分词 ----
     int n_max = (int) prompt.size() + 64;

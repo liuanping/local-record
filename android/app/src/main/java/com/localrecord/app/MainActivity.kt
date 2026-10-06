@@ -820,9 +820,9 @@ class MainActivity : ComponentActivity() {
             report("加载=${ok}（${System.currentTimeMillis() - t0}ms） 已加载=${llm.loadedModel}")
             if (ok) {
                 for (s in listOf(
-                    "头盔",
-                    "会议纪要",
-                    "今天的会议改到下午三点，请大家准时参加。",
+                    "头盔。",
+                    "摔了，你看这个，你看。",
+                    "就是深入到你。",
                     "Please send me the updated report by Friday."
                 )) {
                     val t1 = System.currentTimeMillis()

@@ -29,30 +29,38 @@ class LlmEngine(private val store: ModelStore) {
  * 所以提示词里写死目标语言，并给一个例子。
  */
 private const val TRANSLATE_TO_EN =
-    "You are a translator. Translate the user's Chinese into English.\n" +
-        "Rules: output ONLY the English translation. Never keep any Chinese character in your answer.\n" +
-        "No explanation, no pinyin, no quotes.\n" +
-        "Examples:\n" +
-        "头盔 -> helmet\n" +
-        "会议纪要 -> meeting minutes\n" +
-        "今天的会议改到下午三点 -> The meeting is moved to 3 p.m. today."
+    "You are a translator. Translate the user's Chinese into natural English. " +
+        "Output ONLY the English translation - no Chinese, no explanation, no quotes. " +
+        "Example: 今天下雨了 -> It is raining today."
 
 private const val TRANSLATE_TO_ZH =
-    "You are a translator. Translate the user's English into Simplified Chinese.\n" +
-        "Rules: output ONLY the Chinese translation. Never keep any English word in your answer.\n" +
-        "No explanation, no quotes.\n" +
-        "Examples:\n" +
-        "helmet -> 头盔\n" +
-        "meeting minutes -> 会议纪要\n" +
-        "Send me the report by Friday. -> 请在周五前把报告发给我。"
+    "You are a translator. Translate the user's English into Simplified Chinese. " +
+        "Output ONLY the Chinese translation - no English, no explanation, no quotes. " +
+        "Example: See you tomorrow. -> 明天见。"
 
-/** 第二次：更直接的直译式指令 */
-private const val RETRY_TO_EN = "Translate into English: "
-private const val RETRY_TO_ZH = "把下面这句英文翻译成中文："
+/** 不带例子：兜底"抄例子/串扰" */
+private const val TRANSLATE_EN_NOEG =
+    "Translate the user's Chinese into English. Output only the English translation, " +
+        "nothing else - no Chinese characters, no explanation, no quotes."
 
-/** 第三次：短词/短语用"这个词的英文是什么"的问法（小模型对"词"更容易答对） */
-private const val WORD_TO_EN = "What is the English word for this? Reply with the English translation only: "
-private const val WORD_TO_ZH = "What does this English mean in Chinese? Reply with the Chinese translation only: "
+private const val TRANSLATE_ZH_NOEG =
+    "Translate the user's English into Simplified Chinese. Output only the Chinese translation, " +
+        "nothing else - no English words, no explanation, no quotes."
+
+/** 词典式（无例子）：给很短的词用（"头盔。" → helmet 实测最稳） */
+private const val DICT_EN =
+    "You are a Chinese-English dictionary. The user sends a Chinese word. " +
+        "Reply with its English meaning only: one word, no Chinese, no explanation, no quotes."
+
+private const val DICT_ZH =
+    "You are an English-Chinese dictionary. The user sends an English word. " +
+        "Reply with its Chinese meaning only, no English, no explanation, no quotes."
+
+/** 直译式（无例子）：最后一次尝试 */
+private const val DIRECT_EN =
+    "Translate the user's Chinese into English. Reply with the English translation only."
+private const val DIRECT_ZH =
+    "Translate the user's English into Simplified Chinese. Reply with the Chinese translation only."
 
 fun minutesPrompt(transcript: String): String = """
             下面是一次录音的转写文本（每段格式：[编号] HH:MM:SS 文本）：
@@ -168,32 +176,92 @@ fun minutesPrompt(transcript: String): String = """
      * 所以这里最多试三种问法，每步都用 [mixedScript] 检查有没有中英串扰：
      *   ① 带 few-shot 例子的系统提示  ② 直译式指令  ③ "这个词的英文是什么"式问法
      */
+    /**
+     * 逐句翻译。方向由代码判定（含汉字→英文，否则→中文）。
+     *
+     * 实测两类坑，都要兜：
+     *  ① 小模型对**简单词**会"半翻半留"（"头盔" → "head 盔"）；
+     *  ② 加了 few-shot 例子后，小模型会把**例子的答案当成万能答案**
+     *     （"摔了，你看这个" 也被翻成 helmet）—— 所以本版把例子减到 1 个，
+     *     并新增 [copyingExample] 判断，一旦发现抄例子就换**不带例子**的提示词。
+     */
+    /**
+     * 逐句翻译。方向由代码判定（含汉字→英文，否则→中文）。
+     *
+     * 踩过的三个坑（都在这里兜住）：
+     *  ① 小模型对短词会"半翻半留"（"头盔" → "Head盔"）；
+     *  ② few-shot 例子会被小模型当成万能答案（每句都翻成 helmet）；
+     *  ③ 把指令拼进**用户消息**会被当成正文抄进译文
+     *     （英文句曾被翻成"请把下面这句英文翻译成中文：Please send me …"）
+     *     —— 所以本版所有指令只放在**系统提示**里，用户消息永远是纯原文。
+     */
+    /**
+     * 逐句翻译。方向由代码判定（含汉字→英文，否则→中文）。
+     *
+     * 三轮实测踩的坑（这里都兜住）：
+     *  ① 不给例子 → 小模型退化成"查词"（整句只回一个单词）；
+     *  ② 给例子但没防抄 → 抄第一个例子的答案（每句都 helmet）；
+     *  ③ 把指令拼进用户消息 → 被当成正文抄进译文。
+     * 所以：例子保留（教输出格式），但**防抄检查覆盖每一个例子的答案**，
+     * 一旦发现抄例子/串扰就换不带例子的提示重试；指令一律只在系统提示里。
+     */
     fun translate(text: String, maxTokens: Int = 220): String {
-        val src = text.trim()
+        var src = text.trim()
         if (src.isEmpty()) return ""
         val toEnglish = looksChinese(src)
-        val sys = if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH
-        var out = generate(sys, src, maxTokens).trim()
+        // 很短的输入先去句末标点："头盔。" → "头盔"
+        if (src.length <= 6) src = src.trimEnd('。', '，', '！', '？', '.', ',', '!', '?', '、', ';', '；')
+        val short = src.length <= 6
 
-        if (mixedScript(out, toEnglish)) {
-            Log.i(TAG, "翻译出现中英串扰，换直译问法重试：${out.take(30)}")
-            out = generate(sys, (if (toEnglish) RETRY_TO_EN else RETRY_TO_ZH) + src, maxTokens).trim()
+        var out = generate(
+            when {
+                short && toEnglish -> DICT_EN
+                short -> DICT_ZH
+                toEnglish -> TRANSLATE_TO_EN
+                else -> TRANSLATE_TO_ZH
+            },
+            src, maxTokens
+        ).trim()
+
+        if (bad(out, src, toEnglish)) {
+            Log.i(TAG, "翻译异常（串扰/抄例子），改用无例子提示：${out.take(30)}")
+            out = generate(if (toEnglish) TRANSLATE_EN_NOEG else TRANSLATE_ZH_NOEG, src, maxTokens).trim()
         }
-        if (mixedScript(out, toEnglish)) {
-            Log.i(TAG, "仍然串扰，换「这是什么词」问法：${out.take(30)}")
-            out = generate(sys, (if (toEnglish) WORD_TO_EN else WORD_TO_ZH) + src, maxTokens).trim()
+        if (bad(out, src, toEnglish)) {
+            Log.i(TAG, "仍异常，换直译式提示：${out.take(30)}")
+            out = generate(if (toEnglish) DIRECT_EN else DIRECT_ZH, src, maxTokens).trim()
         }
-        if (mixedScript(out, toEnglish)) {
-            Log.w(TAG, "三种问法都还串扰，保留原样：$out")
+        if (bad(out, src, toEnglish)) {
+            Log.w(TAG, "多次尝试仍有问题，保留原样：$out")
         }
         return out
     }
 
-    /** 目标英文却含汉字 / 目标中文却没有汉字 → 视为串扰 */
+    /** 目标英文却含汉字 / 目标中文却没有汉字 → 串扰 */
     private fun mixedScript(out: String, toEnglish: Boolean): Boolean {
         if (out.isBlank()) return false
         return if (toEnglish) looksChinese(out) else !looksChinese(out)
     }
+
+    /**
+     * 是否"抄例子"：输出恰好等于某个例子的答案，但输入跟那个例子的原文无关。
+     * 覆盖**所有**例子答案 —— 用户真机遇到的"每句都翻成 helmet"就是抄了「头盔 -> helmet」。
+     */
+    private fun copyingExample(out: String, src: String, toEnglish: Boolean): Boolean {
+        val srcLow = src.lowercase()
+        val pairs = if (toEnglish) listOf(
+            "helmet" to "头盔",
+            "the meeting is moved to 3 p.m. today" to "今天的会议改到下午三点",
+        ) else listOf(
+            "头盔" to "helmet",
+            "请在周五前把报告发给我" to "send me the report by friday",
+        )
+        val o = out.trim().trim('"', '。', '.', ' ').lowercase()
+        return pairs.any { (ans, exSrc) -> o == ans && !srcLow.contains(exSrc) }
+    }
+
+    private fun bad(out: String, src: String, toEnglish: Boolean): Boolean =
+        mixedScript(out, toEnglish) || copyingExample(out, src, toEnglish)
 
     fun ask(transcript: String, question: String, maxTokens: Int = 300): String =
         // 问答只要相关片段就够，prompt 越短预填充越快（手机上这一段最费时间）
