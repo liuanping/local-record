@@ -85,6 +85,12 @@
 
 ## 版本记录（本轮踩到的真 bug）
 
+* **3.1.8**：修翻译中英串扰（用户实测：简单词会半翻半留，如「头盔」被翻成「head 盔」）：
+  * 提示词加 few-shot 例子，并明确要求「绝不允许在译文里保留另一种语言」（小模型跟例子比跟规则靠谱）；
+  * 代码侧最多试三种问法：few-shot 提示 → 「Translate into English: xxx」直译式 → 「What is the English word for this?」，
+    每一步都用语言检测判断有没有串扰，三种都不行才保留原样并打日志；
+  * 自检用例加入短词，实测：头盔→helmet、会议纪要→meeting minutes、中英整句互译均正确，RESULT PASS。
+
 * **3.1.7**：录音库加「⋯」菜单（用户需求：录音能不能分享/另存为/重命名）：
   * 每行操作改为「播放 | 转写 | ⋯」，菜单里是**重命名 / 分享 / 另存为 / 删除**；
   * 分享走 FileProvider（新增 res/xml/file_paths.xml 与 Manifest provider），系统分享面板可选微信/邮件/蓝牙等；
