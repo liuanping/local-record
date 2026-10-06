@@ -50,7 +50,10 @@ class SileroVad(private val store: ModelStore) {
          *
          * 补白不超过上一段的结束位置，所以不会重复内容。
          */
-        private const val PREROLL_SEC = 0.7f
+        private const val PREROLL_SEC = 1.0f
+
+    /** 保底引导静音：识别器需要一点前导音频，否则开头第一个字容易被吞 */
+    private const val MIN_LEAD_SEC = 0.35f
     }
 
     private var vad: Vad? = null
@@ -232,19 +235,29 @@ class SileroVad(private val store: ModelStore) {
                 lastSpeechWindows = hit
                 lastSpeechRatio = ratio
                 // 段前补白：起点往前推 0.35 秒，但不超过上一段结束位置
+                // 段前补白：优先取**真实音频**（不重复上一段），再保底补静音。
+                // 保底很重要：识别器需要一点"引导音频"，否则开头第一个字常被吞掉
+                // （用户反馈的"截掉头"）。真实音频不够时用静音补齐，绝不重复上一段内容。
                 val from = maxOf(lastEnd, segStart - ringSize)
-                val pad = if (segStart > from) ringSlice(from, segStart) else FloatArray(0)
+                val realPad = if (segStart > from) ringSlice(from, segStart) else FloatArray(0)
+                val minLead = (SAMPLE_RATE * MIN_LEAD_SEC).toInt()
+                val silence = if (realPad.size < minLead) FloatArray(minLead - realPad.size) else FloatArray(0)
+                val pad = if (silence.isEmpty()) realPad else FloatArray(silence.size + realPad.size).also {
+                    System.arraycopy(silence, 0, it, 0, silence.size)      // 静音在前
+                    System.arraycopy(realPad, 0, it, silence.size, realPad.size)
+                }
                 val out = if (pad.isEmpty()) raw else FloatArray(pad.size + raw.size).also {
                     System.arraycopy(pad, 0, it, 0, pad.size)
                     System.arraycopy(raw, 0, it, pad.size, raw.size)
                 }
                 if (out.isNotEmpty()) {
-                    Log.d(
+                    Log.i(
                         TAG,
-                        "分段：%.2fs 起 +%.2fs（补白 %.2fs，人声 %d 窗 / %.0f%%）".format(
+                        "分段：%.2fs 起 +%.2fs（真实补白 %.2fs + 静音 %.2fs，人声 %d 窗 / %.0f%%）".format(
                             from.toFloat() / SAMPLE_RATE,
                             out.size.toFloat() / SAMPLE_RATE,
-                            pad.size.toFloat() / SAMPLE_RATE,
+                            realPad.size.toFloat() / SAMPLE_RATE,
+                            silence.size.toFloat() / SAMPLE_RATE,
                             hit,
                             ratio * 100,
                         )

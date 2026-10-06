@@ -1962,8 +1962,16 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        val gain = if (peak > 0.05f) 0.9f / peak else 1f
-        if (gain != 1f) for (i in seg.indices) seg[i] *= gain
+        // 音量归一化：**不管声音大小都拉到目标电平**。
+        // 原来写的是 if (peak > 0.05f) 0.9f/peak else 1f —— 音量小的段落直接不放大，
+        // 原样送去识别：麦克风偏小的手机（正是本用户）识别错误率高，开头第一个字也更容易被吞。
+        // 目标峰值 0.5，最多放大 10 倍（再大就把底噪一起抬起来），并做限幅。
+        val targetPeak = 0.5f
+        val gain = if (peak > 1e-4f) (targetPeak / peak).coerceAtMost(10f) else 1f
+        if (gain > 1.02f || gain < 0.98f) {
+            for (i in seg.indices) seg[i] = (seg[i] * gain).coerceIn(-1f, 1f)
+        }
+        android.util.Log.i("Audio", "分段音量 peak=%.4f → 放大 %.1fx（%d 采样）".format(peak, gain, seg.size))
         val text = asr.recognize(seg)
         // 丢不丢这段文字，看**音频证据**（VAD 认为人声的帧数与占比），而不是"文字像不像噪声"。
         // 证据充分（≥8 窗≈0.25 秒 且 占比≥40%）→ 一定是真说话，原样展示（"哈哈哈"也留着）；
