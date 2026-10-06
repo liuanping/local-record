@@ -1968,6 +1968,8 @@ class MainActivity : ComponentActivity() {
         // 目标峰值 0.5，最多放大 10 倍（再大就把底噪一起抬起来），并做限幅。
         val targetPeak = 0.5f
         val gain = if (peak > 1e-4f) (targetPeak / peak).coerceAtMost(10f) else 1f
+        val pk = peak
+        val usedGain = gain
         if (gain > 1.02f || gain < 0.98f) {
             for (i in seg.indices) seg[i] = (seg[i] * gain).coerceIn(-1f, 1f)
         }
@@ -1991,8 +1993,9 @@ class MainActivity : ComponentActivity() {
             segments.add(Seg(text, startSec, end, fmt(startSec)))
             android.util.Log.i("Segments", "加入第 ${segments.size} 段：${text.take(12)}")
             enqueueTranslation(segments.size - 1, text)
+            val peakDb = if (pk > 0f) (20 * kotlin.math.log10(pk.toDouble())).toInt() else -90
             status = if (fromSilero) {
-                "已转写 ${segments.size} 段（人声 $speechWin 窗 / ${(speechPct * 100).toInt()}%）"
+                "已转写 ${segments.size} 段（人声 $speechWin 窗 / ${(speechPct * 100).toInt()}%，峰值 ${peakDb}dB / 放大 %.1fx）".format(usedGain)
             } else {
                 "已转写 ${segments.size} 段（信噪比 %.0f dB）".format(snr)
             }

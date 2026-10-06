@@ -91,9 +91,19 @@ class Recorder(
         )
         if (minBuf <= 0) return false
         val bufSize = max(minBuf * 2, sampleRate / 5 * 2)   // ≥200ms
+        // 音源选择（对识别质量影响很大）：
+        //   降噪 关（默认）→ MIC：原始信号，通常更响，不会被 ROM 的降噪/AGC 吃掉小声说话；
+        //   降噪 开        → VOICE_RECOGNITION + NS/AEC：系统那套为远场语音做的处理。
+        // 之前无论开关都固定用 VOICE_RECOGNITION，部分机型会把小声说话处理没（用户反馈"声音小+漏字"）。
+        val source = if (useEnhancements) {
+            MediaRecorder.AudioSource.VOICE_RECOGNITION
+        } else {
+            MediaRecorder.AudioSource.MIC
+        }
+        android.util.Log.i(TAG, "录音音源=" + if (useEnhancements) "VOICE_RECOGNITION（降噪开）" else "MIC（降噪关）")
         val rec = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                source,
                 sampleRate, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, bufSize
             )
