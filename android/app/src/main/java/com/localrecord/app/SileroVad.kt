@@ -50,10 +50,10 @@ class SileroVad(private val store: ModelStore) {
          *
          * 补白不超过上一段的结束位置，所以不会重复内容。
          */
-        private const val PREROLL_SEC = 1.0f
+        private const val PREROLL_SEC = 1.6f
 
     /** 保底引导静音：识别器需要一点前导音频，否则开头第一个字容易被吞 */
-    private const val MIN_LEAD_SEC = 0.35f
+    private const val MIN_LEAD_SEC = 0.5f
     }
 
     private var vad: Vad? = null
