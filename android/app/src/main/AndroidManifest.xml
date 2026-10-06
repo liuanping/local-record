@@ -29,6 +29,18 @@
             </intent-filter>
         </activity>
 
+        <!-- 分享录音文件用：Android 7+ 不允许直接传 file:// 出去，
+             必须用 FileProvider 生成 content:// 并临时授权 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- 下载模型期间的前台服务：切到别的 app / 锁屏也能继续下 -->
         <service
             android:name=".DownloadService"

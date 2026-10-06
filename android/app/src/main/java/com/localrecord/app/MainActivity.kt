@@ -2,6 +2,7 @@ package com.localrecord.app
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.os.Bundle
@@ -211,6 +212,9 @@ class MainActivity : ComponentActivity() {
     private var deleteDialog by mutableStateOf<File?>(null)    // 删除确认对话框
     private var seeking by mutableStateOf(false)               // 是否正在拖动进度条
     private var textCopied by mutableStateOf(false)            // 转写文字刚被复制
+    private var renameDialog by mutableStateOf<File?>(null)    // 重命名对话框（目标文件）
+    private var renameText by mutableStateOf("")               // 重命名输入框内容
+    private var saveAsSource: File? = null                     // 「另存为」的源文件
     private var llmDialog by mutableStateOf<Pair<String, String>?>(null)   // 大模型结果弹窗（标题 to 内容）
     private var recTick by mutableStateOf(0L)                  // 录音计时/波形的刷新触发器
     private var elapsedUi by mutableStateOf(0f)                // 界面显示的录音时长（由 ticker 推）
@@ -1521,6 +1525,38 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun LibraryTab() {
+        // 重命名对话框（放在页面里，滚动时也不会被裁掉）
+        renameDialog?.let { target ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { renameDialog = null },
+                title = { Text("重命名", fontSize = 15.sp, color = Color.White) },
+                text = {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        label = { Text("文件名（含扩展名）", fontSize = 11.sp) }
+                    )
+                },
+                confirmButton = {
+                    Text(
+                        "确定", color = Accent, fontSize = 13.sp,
+                        modifier = Modifier.clickable {
+                            val name = renameText
+                            renameDialog = null
+                            doRename(target, name)
+                        }
+                    )
+                },
+                dismissButton = {
+                    Text(
+                        "取消", color = Color(0xFF9AA4B2), fontSize = 13.sp,
+                        modifier = Modifier.clickable { renameDialog = null }
+                    )
+                }
+            )
+        }
+
         Column(modifier = Modifier.fillMaxSize()) {
             // 顶部：导入外部音频（mp3/m4a/…），导入后自动转写
             Row(
@@ -1597,10 +1633,41 @@ class MainActivity : ComponentActivity() {
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                             ) { Text("转写", fontSize = 12.sp) }
                             Spacer(Modifier.width(5.dp))
-                            OutlinedButton(
-                                onClick = { deleteDialog = f },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                            ) { Text("删除", fontSize = 12.sp, color = Color(0xFFE05B5B)) }
+                            // 「⋯」菜单：重命名 / 分享 / 另存为 / 删除（和系统录音机一样）
+                            Box {
+                                var menuOpen by remember { mutableStateOf(false) }
+                                OutlinedButton(
+                                    onClick = { menuOpen = true },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) { Text("⋯", fontSize = 14.sp) }
+                                androidx.compose.material3.DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false }
+                                ) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("重命名", fontSize = 13.sp) },
+                                        onClick = {
+                                            menuOpen = false
+                                            renameText = f.name
+                                            renameDialog = f
+                                        }
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("分享", fontSize = 13.sp) },
+                                        onClick = { menuOpen = false; shareAudio(f) }
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("另存为", fontSize = 13.sp) },
+                                        onClick = { menuOpen = false; saveAsAudio(f) }
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = {
+                                            Text("删除", fontSize = 13.sp, color = Color(0xFFE05B5B))
+                                        },
+                                        onClick = { menuOpen = false; deleteDialog = f }
+                                    )
+                                }
+                            }
                         }
                         // 文件路径（点一下看完整路径并复制）—— 像普通录音机一样能找到文件
                         Text(
@@ -1920,6 +1987,89 @@ class MainActivity : ComponentActivity() {
                 "已转写 ${segments.size} 段（信噪比 %.0f dB）".format(snr)
             }
         }
+    }
+
+    /** 分享录音：走系统分享面板（微信 / 邮件 / 蓝牙 / 网盘都行） */
+    private fun shareAudio(f: File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", f
+            )
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "audio/*"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "分享录音"))
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "分享失败", e)
+            status = "分享失败：${e.message}"
+        }
+    }
+
+    /** 另存为：系统文件选择器（SAF）让用户挑位置，然后把音频复制过去 */
+    private val pickSaveAs = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("audio/*")
+    ) { uri ->
+        val srcFile = saveAsSource
+        saveAsSource = null
+        if (uri == null || srcFile == null) return@registerForActivityResult
+        status = "正在另存为…"
+        io.execute {
+            val ok = try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    srcFile.inputStream().use { input -> input.copyTo(out) }
+                }
+                true
+            } catch (e: Throwable) {
+                android.util.Log.e("MainActivity", "另存为失败", e)
+                false
+            }
+            runOnUiThread { status = if (ok) "已另存为 ${srcFile.name}" else "另存为失败" }
+        }
+    }
+
+    private fun saveAsAudio(f: File) {
+        saveAsSource = f
+        try {
+            pickSaveAs.launch(f.name)
+        } catch (e: Throwable) {
+            status = "打不开保存对话框：${e.message}"
+        }
+    }
+
+    /** 重命名：保留原扩展名；正在播放就先停掉，避免重命名后播放出错 */
+    private fun doRename(f: File, input: String) {
+        val clean = input.trim().replace("/", "_").replace("\\", "_")
+        if (clean.isEmpty()) {
+            status = "文件名不能为空"
+            return
+        }
+        val ext = f.name.substringAfterLast('.', "")
+        val newName = if (ext.isNotEmpty() && !clean.endsWith(".$ext")) "$clean.$ext" else clean
+        val target = File(f.parentFile, newName)
+        if (target.absolutePath == f.absolutePath) return
+        if (target.exists()) {
+            status = "已经有同名文件了：$newName"
+            return
+        }
+        if (playingPath == f.absolutePath) {
+            try {
+                player?.stop()
+                player?.release()
+            } catch (_: Throwable) {
+            }
+            player = null
+            playingPath = null
+            playingPaused = false
+        }
+        val ok = try {
+            f.renameTo(target)
+        } catch (_: Throwable) {
+            false
+        }
+        status = if (ok) "已重命名为 ${target.name}" else "重命名失败"
+        if (ok) refreshRecordings()
     }
 
     private fun transcribe(f: File) {
