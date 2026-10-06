@@ -30,28 +30,19 @@ class LlmEngine(private val store: ModelStore) {
  */
 private const val TRANSLATE_TO_EN =
     "You are a translator. Translate the user's Chinese into natural English. " +
-        "Output ONLY the English translation - no Chinese characters, no explanation, no quotes. " +
-        "Never keep any Chinese character in your answer."
+        "Output ONLY the English translation - no Chinese, no explanation, no quotes. " +
+        "Never keep any Chinese character in your answer. " +
+        "Example: 今天下雨了 -> It is raining today."
 
 private const val TRANSLATE_TO_ZH =
     "You are a translator. Translate the user's English into Simplified Chinese. " +
-        "Output ONLY the Chinese translation - no English words, no explanation, no quotes. " +
-        "Never keep any English word in your answer."
+        "Output ONLY the Chinese translation - no English, no explanation, no quotes. " +
+        "Never keep any English word in your answer. " +
+        "Example: See you tomorrow. -> 明天见。"
 
-/** 不带例子（短词最容易串扰，给它专用的"词典式"提示，无例子可抄） */
-private const val DICT_EN =
-    "You are a Chinese-English dictionary. The user sends a Chinese word. " +
-        "Reply with its English meaning only: one word, no Chinese, no explanation, no quotes."
-
-private const val DICT_ZH =
-    "You are an English-Chinese dictionary. The user sends an English word. " +
-        "Reply with its Chinese meaning only, no English, no explanation, no quotes."
-
-/** 兜底：直译式提示 */
-private const val DIRECT_EN =
-    "Translate the user's Chinese into English. Reply with the English translation only."
-private const val DIRECT_ZH =
-    "Translate the user's English into Simplified Chinese. Reply with the Chinese translation only."
+/** 兜底重试用的强指令（0.6B 小模型有时会原样返回，换个问法往往就肯翻了） */
+private const val RETRY_TO_EN = "Translate into English: "
+private const val RETRY_TO_ZH = "把下面这句英文翻译成中文："
 
 fun minutesPrompt(transcript: String): String = """
             下面是一次录音的转写文本（每段格式：[编号] HH:MM:SS 文本）：
@@ -160,52 +151,30 @@ fun minutesPrompt(transcript: String): String = """
     private fun looksChinese(s: String): Boolean =
         s.any { it.code in 0x3400..0x9FFF || it.code in 0xF900..0xFAFF }
 
-    /**
-     * 逐句翻译。方向由代码判定（含汉字→英文，否则→中文）。
-     *
-     * 加固点（都来自实测）：
-     *  ① 提示词明确"不许保留另一种语言"，缓解"头盔 → head 盔"这类半翻半留；
-     *  ② 很短的词改用**词典式**提示（不给例子，避免小模型把例子当万能答案）；
-     *  ③ 发现串扰就换更直接的提示重试；**指令只放系统提示**，用户消息永远是纯原文
-     *     （曾经把指令拼进用户消息，结果被模型抄进译文）。
-     */
     fun translate(text: String, maxTokens: Int = 220): String {
-        var src = text.trim()
+        val src = text.trim()
         if (src.isEmpty()) return ""
         val toEnglish = looksChinese(src)
-        if (src.length <= 6) src = src.trimEnd('。', '，', '！', '？', '.', ',', '!', '?', '、', ';', '；')
-        val short = src.length <= 6
-
         var out = generate(
-            when {
-                short && toEnglish -> DICT_EN
-                short -> DICT_ZH
-                toEnglish -> TRANSLATE_TO_EN
-                else -> TRANSLATE_TO_ZH
-            },
-            src, maxTokens
+            if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
+            src,
+            maxTokens
         ).trim()
-
-        if (mixedScript(out, toEnglish)) {
-            Log.i(TAG, "翻译出现串扰，换直译式提示重试：${out.take(30)}")
-            out = generate(if (toEnglish) DIRECT_EN else DIRECT_ZH, src, maxTokens).trim()
+        // 0.6B 小模型偶尔"原样返回"（该译成中文却还是英文）。换个更直接的说法重试一次。
+        val wrongLanguage = if (toEnglish) {
+            looksChinese(out)                                  // 要英文却给了中文
+        } else {
+            out.isNotBlank() && !looksChinese(out)             // 要中文却还是英文
         }
-        if (mixedScript(out, toEnglish)) {
-            Log.i(TAG, "仍串扰，再换不带例子的提示：${out.take(30)}")
+        if (wrongLanguage) {
+            Log.i(TAG, "翻译语言不对，换问法重试：${out.take(30)}")
             out = generate(
-                if (toEnglish) "Translate the user's Chinese into English. Output only the English translation."
-                else "Translate the user's English into Simplified Chinese. Output only the Chinese translation.",
-                src, maxTokens
+                if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH,
+                (if (toEnglish) RETRY_TO_EN else RETRY_TO_ZH) + src,
+                maxTokens
             ).trim()
         }
-        if (mixedScript(out, toEnglish)) Log.w(TAG, "多次尝试仍串扰，保留原样：$out")
         return out
-    }
-
-    /** 目标英文却含汉字 / 目标中文却没有汉字 → 串扰 */
-    private fun mixedScript(out: String, toEnglish: Boolean): Boolean {
-        if (out.isBlank()) return false
-        return if (toEnglish) looksChinese(out) else !looksChinese(out)
     }
 
     fun ask(transcript: String, question: String, maxTokens: Int = 300): String =
