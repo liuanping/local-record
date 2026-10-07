@@ -49,7 +49,7 @@ llama-b11274-bin-win-cpu-x64.zip
 # 例外：只放行**最新一版** APK（历史版本走发行版附件，避免仓库越滚越大）
 # 出下一版时把下面两行的版本号一起改掉即可
 dist-android/LocalRecord-android-*.apk
-!dist-android/LocalRecord-android-3.2.7.apk
+!dist-android/LocalRecord-android-3.2.8.apk
 
 # 开发时的临时脚本（不进开源仓库）
 _*.py
