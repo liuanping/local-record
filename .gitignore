@@ -1,4 +1,4 @@
-﻿# 注意：.gitignore 不支持行尾注释，注释必须单独一行，否则整行都会被当成匹配模式
+# 注意：.gitignore 不支持行尾注释，注释必须单独一行，否则整行都会被当成匹配模式
 
 # 虚拟环境 / 构建产物
 .venv/
@@ -46,7 +46,9 @@ json_reference/
 llama-b11274-bin-win-cpu-x64.zip
 .zcode/
 
-# 例外：允许提交最新版 APK（放在 Releases 里更好，见 README）
+# 例外：只放行**最新一版** APK（历史版本走发行版附件，避免仓库越滚越大）
+# 出下一版时把下面两行的版本号一起改掉即可
+dist-android/LocalRecord-android-*.apk
 !dist-android/LocalRecord-android-3.2.6.apk
 
 # 开发时的临时脚本（不进开源仓库）
