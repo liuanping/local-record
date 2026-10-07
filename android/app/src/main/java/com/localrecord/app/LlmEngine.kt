@@ -161,20 +161,37 @@ fun minutesPrompt(transcript: String): String = """
     private val DICT_ZH = "You are an English-Chinese dictionary. The user sends an English word. " +
         "Reply with its Chinese meaning only, no English, no explanation, no quotes."
 
-    fun translate(text: String, maxTokens: Int = 220): String {
+    /**
+     * 按输入长度给输出算一个**上限**，避免"停不下来"（用户要求）：
+     *   中文→英文：约 1.2 × 汉字数 + 10（20 个中文字 → 上限 34 token）
+     *   英文→中文：约 1.2 × 单词数 + 10（30 个单词 → 上限 46 token）
+     * 下限 24（短词也要能出完整译文），上限 320。
+     */
+    private fun outCap(src: String, toEnglish: Boolean): Int {
+        val n = if (toEnglish) {
+            src.count { it.code in 0x3400..0x9FFF }
+        } else {
+            src.split(Regex("\\s+")).count { it.isNotBlank() }
+        }
+        return ((n * 1.2).toInt() + 10).coerceIn(24, 320)
+    }
+
+    fun translate(text: String, maxTokens: Int = 0): String {
         var src = text.trim()
         if (src.isEmpty()) return ""
         // 很短的输入先去句末标点："头盔。" → "头盔"（标点会让小模型开始"造句"）
         if (src.length <= 6) src = src.trimEnd('。', '，', '！', '？', '.', ',', '!', '?', '、', ';', '；')
         val toEnglish = looksChinese(src)
         val short = src.length <= 6
+        // 输出上限按输入长度算（调用方显式传了就用调用方的）
+        val cap = if (maxTokens > 0) maxTokens else outCap(src, toEnglish)
         val sys = when {
             short && toEnglish -> DICT_EN
             short -> DICT_ZH
             toEnglish -> TRANSLATE_TO_EN
             else -> TRANSLATE_TO_ZH
         }
-        var out = generate(sys, src, maxTokens).trim()
+        var out = generate(sys, src, cap).trim()
         // 0.6B 小模型偶尔"原样返回"或"半翻半留"（头盔 → head 盔）。换个更直接的说法重试一次。
         val wrongLanguage = if (toEnglish) {
             looksChinese(out)
@@ -193,9 +210,10 @@ fun minutesPrompt(transcript: String): String = """
                     if (toEnglish) TRANSLATE_TO_EN else TRANSLATE_TO_ZH
                 },
                 src,
-                maxTokens
+                cap
             ).trim()
         }
+        Log.i(TAG, "翻译：输入 ${src.length} 字 → 输出上限 ${cap} token，实际输出 ${out.length} 字")
         return out
     }
 
